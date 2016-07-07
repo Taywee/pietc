@@ -1,3 +1,3 @@
-# pc
+# pietc
 
 A piet compiler
