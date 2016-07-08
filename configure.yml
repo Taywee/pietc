@@ -1,0 +1,9 @@
+DEFAULT:
+  libs: [protobuf, json-c, openssl]
+  cxxflags: [-std=c++11]
+  cxxflagscli: [Magick++-config --cppflags --cxxflags]
+  libscli: [Magick++-config --libs --ldflags]
+  debug:
+    cflags: [-O0, -DDEBUG, -D_DEBUG]
+  release:
+    cflags: [-O3, -DNDEBUG]

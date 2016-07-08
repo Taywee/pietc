@@ -1,0 +1,134 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+# Copyright © 2016 Taylor C. Richberger <taywee@gmx.com>
+# This code is released under the license described in the LICENSE file
+
+from ninja_syntax import Writer
+from itertools import chain
+from os import environ as env, listdir
+import platform
+from subprocess import check_output
+import argparse
+import yaml
+import os.path
+
+import re
+
+CXXREGEX = re.compile(R'\.(?:cc|C|cxx|cpp)$')
+
+def btos(b):
+    try:
+        return str(b, 'utf-8')
+    except TypeError:
+        return b
+
+def get(var, defvar=None, systemrelease=None, system=None, defaultrelease=None, default=None, envvar=None):
+    if defvar is None:
+        defvar = []
+
+    val = None
+    release = None
+    if system is not None and val is None:
+        val = system.get(var)
+    if default is not None and val is None:
+        val = default.get(var)
+    if envvar is not None and val is None:
+        val = env.get(envvar)
+    if val is None:
+        val = defvar
+
+    if systemrelease is not None and release is None:
+        release = systemrelease.get(var)
+    if defaultrelease is not None and release is None:
+        release = defaultrelease.get(var)
+
+    if release is not None:
+        if isinstance(val, list) or isinstance(release, list):
+            if not isinstance(val, list):
+                val = [val]
+            if not isinstance(release, list):
+                release = [release]
+            val += release
+        else:
+            val = release
+
+    return val
+
+def main():
+    parser = argparse.ArgumentParser('Build the ninja build file')
+    parser.add_argument('-d', '--debug', help='Enable debug mode', action='store_true')
+    parser.add_argument('-c', '--config', help='Use an alternate config file (default %(default)s)', default='configure.yml')
+    parser.add_argument('executable', help='The name of the executable file')
+    args = parser.parse_args()
+    try:
+        with open(args.config, 'r') as config:
+            conf = yaml.load(config)
+    except:
+        conf = {}
+
+    system = conf.get(platform.system(), {})
+    systemrelease = system.get('debug' if args.debug else 'release', {})
+    default = conf.get('DEFAULT', {})
+    defaultrelease = default.get('debug' if args.debug else 'release', {})
+
+    cc = get('cc', system=system, systemrelease=systemrelease, default=default, defaultrelease=defaultrelease, envvar='CC', defvar='cc')
+    cxx = get('cxx', system=system, systemrelease=systemrelease, default=default, defaultrelease=defaultrelease, envvar='CXX', defvar='c++')
+    libs = get('libs', system=system, systemrelease=systemrelease, default=default, defaultrelease=defaultrelease, envvar='LIBS')
+
+    lflags = get('lflags', system=system, systemrelease=systemrelease, default=default, defaultrelease=defaultrelease) + (btos(check_output(['pkg-config', '--libs'] + libs)).split() if libs else [])
+    lflags += [item for group in (check_output(cli, shell=True).split() for cli in get('lflagscli', system=system, systemrelease=systemrelease, default=default, defaultrelease=defaultrelease)) for item in group]
+    cflags = get('cflags', system=system, systemrelease=systemrelease, default=default, defaultrelease=defaultrelease) + (btos(check_output(['pkg-config', '--cflags'] + libs)).split() if libs else [])
+    cflags += [item for group in (check_output(cli, shell=True).split() for cli in get('cflagscli', system=system, systemrelease=systemrelease, default=default, defaultrelease=defaultrelease)) for item in group]
+    cxxflags = get('cxxflags', system=system, systemrelease=systemrelease, default=default, defaultrelease=defaultrelease) + cflags
+    cxxflags += [item for group in (check_output(cli, shell=True).split() for cli in get('cxxflagscli', system=system, systemrelease=systemrelease, default=default, defaultrelease=defaultrelease)) for item in group]
+
+    cxxfiles = {file: '{}.o'.format(file) for file in listdir('.') if not file.startswith('.tmp') and CXXREGEX.search(file) and '.pb.' not in file}
+    cfiles = {file: '{}.o'.format(file) for file in listdir('.') if not file.startswith('.tmp') and file.endswith('.c') and '.pb.' not in file}
+
+    protobuf = {file: '{}.pb.cc.o'.format(os.path.splitext(file)[0]) for file in listdir('.') if not file.startswith('.tmp') and file.endswith('.proto')}
+
+    with open('build.ninja', 'w') as build:
+        ninja = Writer(build)
+        ninja.variable('lflags', lflags)
+
+        if protobuf:
+            ninja.rule('genproto', 'protoc --cpp_out=. $in')
+
+        if cxxfiles:
+            ninja.variable('cxx', cxx)
+            ninja.variable('cxxflags', cxxflags)
+            ninja.rule('cxxcompile', '$cxx -MMD -MF $out.d $cxxflags -c -o $out -c $in',
+                deps='gcc',
+                depfile='$out.d')
+        if cfiles:
+            ninja.variable('cc', cc)
+            ninja.variable('cflags', cflags)
+            ninja.rule('compile', '$cc -MMD -MF $out.d $cflags -c -o $out -c $in',
+                deps='gcc',
+                depfile='$out.d')
+
+        ninja.rule('link', '${} $lflags -o $out $in'.format('cxx' if cxxfiles else 'cc'))
+
+        order_only = list()
+
+        # Protobufs should generate first
+        for file, target in protobuf.items():
+            basename = os.path.basename(file)
+            root, ext = os.path.splitext(basename)
+            ninja.build([root + '.pb.cc', root + '.pb.h'], 'genproto', file)
+            ninja.build(target, 'cxxcompile', root + '.pb.cc')
+
+            order_only.append(root + '.pb.h')
+
+        for file, target in cfiles.items():
+            ninja.build(target, 'compile', file, order_only=order_only)
+
+        for file, target in cxxfiles.items():
+            ninja.build(target, 'cxxcompile', file, order_only=order_only)
+
+        ninja.build(args.executable, 'link', list(chain(protobuf.values(), cfiles.values(), cxxfiles.values())))
+
+        ninja.default(args.executable)
+
+if __name__ == '__main__':
+    main()

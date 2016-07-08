@@ -41,4 +41,6 @@ CMakeFiles
 cmake_install.cmake
 install_manifest.txt
 *-prefix
-gitlike
+*.ninja
+.ninja_*
+pietc
