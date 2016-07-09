@@ -5,11 +5,14 @@
 #include <iostream>
 #include <set>
 #include <list>
+#include <vector>
 #include <algorithm>
 #include <numeric>
 
 #include <args.hxx>
 #include <Magick++.h>
+
+#include "color.hxx"
 
 template <typename Pix>
 bool Equals(const Pix &a, const Pix &b)
@@ -69,10 +72,10 @@ int main(const int argc, const char **argv)
     size_t codelsize = args::get(cs);
     Magick::Pixels pixels(image);
 
+    const auto size = image.size();
     if (codelsize == 0)
     {
-        std::set<size_t> linestops;
-        const auto size = image.size();
+        std::set<size_t> linestops{0, size.width(), size.height()};
 
         // First do each row
         for (size_t y = 0; y < size.height(); ++y)
@@ -110,7 +113,14 @@ int main(const int argc, const char **argv)
         std::adjacent_difference(std::begin(linestops), std::end(linestops), std::begin(diffs));
         diffs.pop_front();
         codelsize = *std::min_element(std::begin(diffs), std::end(diffs));
+        std::cout << "autodetected codel size: " << codelsize << std::endl;
     }
+
+    // Each vector member is a row, indexed top down
+    std::vector<std::vector<Codel>> field(
+        size.height() / codelsize,
+        std::vector<Codel>(size.width()));
+
 
     return 0;
 }

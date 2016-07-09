@@ -15,7 +15,13 @@ enum class Color {
 };
 
 enum class Shade {
+    Unknown,
     Light,
     Normal,
     Dark
+};
+
+struct Codel {
+    Color color;
+    Shade shade;
 };
