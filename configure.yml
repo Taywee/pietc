@@ -1,5 +1,4 @@
 DEFAULT:
-  libs: [protobuf, json-c, openssl]
   cxxflags: [-std=c++11]
   cxxflagscli: [Magick++-config --cppflags --cxxflags]
   lflagscli: [Magick++-config --libs --ldflags]

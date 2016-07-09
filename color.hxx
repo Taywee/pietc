@@ -4,6 +4,7 @@
 
 #include <functional>
 #include <cstddef>
+#include <cstdint>
 
 #include <Magick++.h>
 
@@ -31,11 +32,13 @@ struct Codel {
     Color color;
 };
 
+using std::uint8_t;
+
 struct PixelColor {
-    const unsigned char red;
-    const unsigned char green;
-    const unsigned char blue;
-    PixelColor(unsigned char red, unsigned char green, unsigned char blue) :
+    const uint8_t red;
+    const uint8_t green;
+    const uint8_t blue;
+    PixelColor(uint8_t red, uint8_t green, uint8_t blue) :
         red(red),
         green(green),
         blue(blue)
