@@ -169,6 +169,24 @@ int main(const int argc, const char **argv)
         CC cc = CC::Left;
         DC dc = DC::East;
         std::shared_ptr<ColorBlock> block = map.find(Coords{0, 0})->second;
+        bool exit = false;
+
+        switch (block->codel.color)
+        {
+            case Color::White:
+                std::tie(block, dc, cc, exit) = TraceWhite(Coords{0, 0}, field, map, dc, cc);
+                break;
+            case Color::Black:
+                return 1;
+                break;
+            default:
+                break;
+        }
+        if (exit)
+        {
+            return 0;
+        }
+
         std::list<long long int> stack;
         while (1)
         {
@@ -176,24 +194,17 @@ int main(const int argc, const char **argv)
             {
                 std::cout << "##########" << std::endl;
                 std::cout << "Codel   : " << block->codel << std::endl;
-                std::cout << "Exits NL: "
-                    << block->exits[static_cast<size_t>(DC::North)][static_cast<size_t>(CC::Left)] << ' '
-                    << block->exits[static_cast<size_t>(DC::North)][static_cast<size_t>(CC::Right)] << ' '
-                    << block->exits[static_cast<size_t>(DC::East)][static_cast<size_t>(CC::Left)] << ' '
-                    << block->exits[static_cast<size_t>(DC::East)][static_cast<size_t>(CC::Right)] << ' '
-                    << block->exits[static_cast<size_t>(DC::South)][static_cast<size_t>(CC::Left)] << ' '
-                    << block->exits[static_cast<size_t>(DC::South)][static_cast<size_t>(CC::Right)] << ' '
-                    << block->exits[static_cast<size_t>(DC::West)][static_cast<size_t>(CC::Left)] << ' '
-                    << block->exits[static_cast<size_t>(DC::West)][static_cast<size_t>(CC::Right)] << std::endl;
-                std::cout << "Exits Alive: "
-                    << !block->neighbors[static_cast<size_t>(DC::North)][static_cast<size_t>(CC::Left)].block.expired() << ' '
-                    << !block->neighbors[static_cast<size_t>(DC::North)][static_cast<size_t>(CC::Right)].block.expired() << ' '
-                    << !block->neighbors[static_cast<size_t>(DC::East)][static_cast<size_t>(CC::Left)].block.expired() << ' '
-                    << !block->neighbors[static_cast<size_t>(DC::East)][static_cast<size_t>(CC::Right)].block.expired() << ' '
-                    << !block->neighbors[static_cast<size_t>(DC::South)][static_cast<size_t>(CC::Left)].block.expired() << ' '
-                    << !block->neighbors[static_cast<size_t>(DC::South)][static_cast<size_t>(CC::Right)].block.expired() << ' '
-                    << !block->neighbors[static_cast<size_t>(DC::West)][static_cast<size_t>(CC::Left)].block.expired() << ' '
-                    << !block->neighbors[static_cast<size_t>(DC::West)][static_cast<size_t>(CC::Right)].block.expired() << std::endl;
+                std::cout << "Exits   : " << std::endl;
+                for (auto dc: std::list<DC>{DC::North, DC::East, DC::South, DC::West})
+                {
+                    for (auto cc: std::list<CC>{CC::Left, CC::Right})
+                    {
+                        if (!block->neighbors[static_cast<size_t>(dc)][static_cast<size_t>(cc)].block.expired())
+                        {
+                            std::cout << "    " << dc << cc << "  : " << block->exits[static_cast<size_t>(dc)][static_cast<size_t>(cc)] << std::endl;
+                        }
+                    }
+                }
                 std::cout << "Stack   : ";
                 std::copy(std::begin(stack), std::end(stack), std::ostream_iterator<long long int>(std::cout, " "));
                 std::cout << std::endl;
@@ -239,8 +250,8 @@ int main(const int argc, const char **argv)
                         case OP::PUSH:
                             {
                                 stack.push_back(block->size);
-                                break;
                             }
+                            break;
                         case OP::POP:
                             if (stack.size() >= 1)
                             {
@@ -343,7 +354,7 @@ int main(const int argc, const char **argv)
                                     dc = static_cast<DC>((static_cast<size_t>(dc) + 4 - (first % 4)) % 4);
                                 }
                             }
-                                break;
+                            break;
                         case OP::SWITCH:
                             if (stack.size() >= 1)
                             {
@@ -358,13 +369,13 @@ int main(const int argc, const char **argv)
                                     cc = Toggle(cc);
                                 }
                             }
-                                break;
+                            break;
                         case OP::DUPLICATE:
                             if (stack.size() >= 1)
                             {
                                 stack.push_back(stack.back());
-                                break;
                             }
+                            break;
                         case OP::ROLL:
                             if (stack.size() >= 2)
                             {
@@ -390,41 +401,41 @@ int main(const int argc, const char **argv)
 
                                     std::rotate(stack.rbegin(), newtop, rollend);
                                 }
-                                break;
                             }
+                            break;
                         case OP::INN:
                             {
                                 std::cout << args::get(prompt);
                                 long long int input;
                                 std::cin >> input;
                                 stack.push_back(input);
-                                break;
                             }
+                            break;
                         case OP::INC:
                             {
                                 std::cout << args::get(prompt);
                                 stack.push_back(std::cin.get());
-                                break;
                             }
+                            break;
                         case OP::OUTN:
                             if (stack.size() >= 1)
                             {
                                 std::cout << stack.back() << std::flush;
                                 stack.pop_back();
                             }
-                                break;
+                            break;
                         case OP::OUTC:
                             if (stack.size() >= 1)
                             {
                                 std::cout << static_cast<char>(stack.back()) << std::flush;
                                 stack.pop_back();
                             }
-                                break;
+                            break;
                         case OP::EXIT:
                             {
                                 return 0;
-                                break;
                             }
+                            break;
                         default:
                             break;
                     }
