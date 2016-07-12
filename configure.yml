@@ -3,6 +3,6 @@ DEFAULT:
   cxxflagscli: [Magick++-config --cppflags --cxxflags]
   lflagscli: [Magick++-config --libs --ldflags]
   debug:
-    cflags: [-O0, -DDEBUG, -D_DEBUG]
+    cflags: [-DDEBUG, -D_DEBUG, -O0, -ggdb]
   release:
     cflags: [-O3, -DNDEBUG]

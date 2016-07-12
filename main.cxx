@@ -3,10 +3,12 @@
  */
 
 #include <iostream>
+#include <iomanip>
 #include <set>
 #include <list>
 #include <vector>
 #include <algorithm>
+#include <memory>
 #include <numeric>
 #include <unordered_map>
 
@@ -18,6 +20,7 @@
 using Field = std::vector<std::vector<Codel>>;
 
 static Field ImageToField(const std::string filename, size_t codelsize);
+static void PrintField(const Field &field, const std::unordered_map<Coords, std::shared_ptr<ColorBlock>> &map);
 
 int main(const int argc, const char **argv)
 {
@@ -56,74 +59,87 @@ int main(const int argc, const char **argv)
 
     try {
         const Field field = ImageToField(args::get(input), args::get(cs));
+        std::unordered_map<Coords, std::shared_ptr<ColorBlock>> map;
+
+        for (size_t y = 0; y < field.size(); ++y)
+        {
+            const auto &row = field[y];
+            for (size_t x = 0; x < row.size(); ++x)
+            {
+                const auto &codel = row[x];
+                if (map.find(Coords{x, y}) == map.end())
+                {
+                    // Queue-based flood fill algorithm: https://en.wikipedia.org/wiki/Flood_fill
+                    std::unordered_set<Coords> processed;
+                    for (std::unordered_set<Coords> queue{Coords{x, y}}; !queue.empty();)
+                    {
+                        const auto it = queue.begin();
+                        const auto n = *it;
+                        queue.erase(it);
+                        const auto &x = std::get<0>(n);
+                        const auto &y = std::get<1>(n);
+
+                        const auto &ncodel = field[y][x];
+                        // Check this codel color against other existing ones
+                        if (ncodel == codel)
+                        {
+                            processed.emplace(n);
+
+                            // West
+                            if (x > 0)
+                            {
+                                const Coords coord{x - 1, y};
+                                if (processed.find(coord) == processed.end() && queue.find(coord) == queue.end())
+                                {
+                                    queue.emplace(coord);
+                                }
+                            }
+                            // East
+                            if (x < (row.size() - 1))
+                            {
+                                const Coords coord{x + 1, y};
+                                if (processed.find(coord) == processed.end() && queue.find(coord) == queue.end())
+                                {
+                                    queue.emplace(coord);
+                                }
+                            }
+                            // North
+                            if (y > 0)
+                            {
+                                const Coords coord{x, y - 1};
+                                if (processed.find(coord) == processed.end() && queue.find(coord) == queue.end())
+                                {
+                                    queue.emplace(coord);
+                                }
+                            }
+                            // South
+                            if (y < (field.size() - 1))
+                            {
+                                const Coords coord{x, y + 1};
+                                if (processed.find(coord) == processed.end() && queue.find(coord) == queue.end())
+                                {
+                                    queue.emplace(coord);
+                                }
+                            }
+                        }
+                    }
+                    // The color blocks live entirely in the map
+                    auto colorBlock = std::make_shared<ColorBlock>(codel, processed.size(), std::list<Coords>(std::begin(processed), std::end(processed)));
+
+                    for (const auto &coord: processed)
+                    {
+                        map.insert(std::make_pair(coord, colorBlock));
+                    }
+                }
+            }
+        }
+
         // TODO:
-        // * Iterate whole field, adding each color block to a color block vector (ie. if the found pixel isn't already part of a color block, it's a new color block)
-        // * create a map of pairs that points each colored pixel to a specific color block (Use a flood fill algorithm)
-        // * trace each color block out each of its 8 directions to another color block or dead end
+        // * trace each color block out each of its 8 directions to another color block or dead end (This should probably be done inside of ColorBlock for easier encapsulation)
         // * do determinations on which color blocks and white directions are program exits
         // * Once this is done, the graphical image is no longer necessary and may be thrown away
         // * generate a sort of AST (but more of an Abstract Syntax Map, as the program is 2D) for use with code generation
-        for (const auto &row: field)
-        {
-            for (const auto &pixel: row)
-            {
-
-                switch (pixel.color)
-                {
-                    case Color::Black:
-                        std::cout << "KK";
-                        continue;
-                        break;
-                    case Color::White:
-                        std::cout << "WW";
-                        continue;
-                        break;
-                    default:
-                        break;
-                }
-
-                switch (pixel.shade)
-                {
-                    case Shade::Light:
-                        std::cout << 'L';
-                        break;
-                    case Shade::Normal:
-                        std::cout << 'N';
-                        break;
-                    case Shade::Dark:
-                        std::cout << 'D';
-                        break;
-                    default:
-                        std::cout << 'X';
-                        break;
-                }
-                switch (pixel.color)
-                {
-                    case Color::Red:
-                        std::cout << 'R';
-                        break;
-                    case Color::Yellow:
-                        std::cout << 'Y';
-                        break;
-                    case Color::Green:
-                        std::cout << 'G';
-                        break;
-                    case Color::Cyan:
-                        std::cout << 'C';
-                        break;
-                    case Color::Blue:
-                        std::cout << 'B';
-                        break;
-                    case Color::Magenta:
-                        std::cout << 'M';
-                        break;
-                    default:
-                        std::cout << 'U';
-                        break;
-                }
-            }
-            std::cout << std::endl;
-        }
+        PrintField(field, map);
     }
     catch (const Magick::Exception &e)
     {
@@ -241,4 +257,60 @@ Field ImageToField(const std::string filename, size_t codelsize)
         }
     }
     return field;
+}
+
+
+void PrintField(const Field &field, const std::unordered_map<Coords, std::shared_ptr<ColorBlock>> &map)
+{
+    for (size_t y = 0; y < field.size(); ++y)
+    {
+        const auto &row = field[y];
+        for (size_t x = 0; x < row.size(); ++x)
+        {
+            const auto it = map.find(Coords{x, y});
+            if (it == std::end(map))
+            {
+                std::cout << "   ";
+            } else
+            {
+                std::cout << static_cast<char>(033) << '[';
+                const auto &codel = it->second->codel;
+                switch (codel.color)
+                {
+                    case Color::Black:
+                        std::cout << "40";
+                        break;
+                    case Color::Red:
+                        std::cout << "41";
+                        break;
+                    case Color::Green:
+                        std::cout << "42";
+                        break;
+                    case Color::Yellow:
+                        std::cout << "43";
+                        break;
+                    case Color::Blue:
+                        std::cout << "44";
+                        break;
+                    case Color::Magenta:
+                        std::cout << "45";
+                        break;
+                    case Color::Cyan:
+                        std::cout << "46";
+                        break;
+                    case Color::White:
+                        std::cout << "47";
+                        break;
+                    default:
+                        std::cout << "47";
+                        break;
+                }
+                std::cout << 'm';
+                std::cout << std::setfill('0') << std::setw(3) << it->second->size;
+            }
+            std::cout << ' ';
+            std::cout << static_cast<char>(033) << "[39;49m";
+        }
+        std::cout << '\n';
+    }
 }
