@@ -11,6 +11,7 @@
 #include <memory>
 #include <numeric>
 #include <stack>
+#include <sstream>
 #include <functional>
 #include <unordered_map>
 
@@ -19,7 +20,7 @@
 
 #include "color.hxx"
 
-static Field ImageToField(const std::string filename, size_t codelsize);
+static Field ImageToField(const std::string filename, size_t codelsize, Color unknown);
 static void PrintField(const Field &field, const Map &map);
 
 int main(const int argc, const char **argv)
@@ -29,6 +30,10 @@ int main(const int argc, const char **argv)
             "executable, as well as run the optimized JIT compiled Piet program immediately.");
     args::HelpFlag help(parser, "help", "Display this help menu", {'h', "help"});
     args::ValueFlag<size_t> cs(parser, "size", "Set the codel size manually (0 tries to auto-detect, which usually works, but may be imperfect in certain scenarios)", {"cs", "codel-size"}, 0);
+    args::Flag trace(parser, "trace", "Trace program run", {'t', "trace"});
+    args::Flag unknownWhite(parser, "unknown-white", "Make unknown colors white", {"unknown-white"});
+    args::Flag unknownBlack(parser, "unknown-black", "Make unknown colors black", {"unknown-black"});
+    args::ValueFlag<std::string> prompt(parser, "prompt", "Prompt for input operations", {'p', "prompt"}, "? ");
     args::Group required(parser, "", args::Group::Validators::All);
     args::Positional<std::string> input(required, "input", "Input file to use");
 
@@ -58,7 +63,7 @@ int main(const int argc, const char **argv)
     }
 
     try {
-        const Field field = ImageToField(args::get(input), args::get(cs));
+        const Field field = ImageToField(args::get(input), args::get(cs), (unknownWhite ? Color::White : (unknownBlack ? Color::Black : Color::Unknown)));
         Map map;
 
         for (size_t y = 0; y < field.size(); ++y)
@@ -164,9 +169,35 @@ int main(const int argc, const char **argv)
         CC cc = CC::Left;
         DC dc = DC::East;
         std::shared_ptr<ColorBlock> block = map.find(Coords{0, 0})->second;
-        std::stack<long long int> stack;
+        std::list<long long int> stack;
         while (1)
         {
+            if (trace)
+            {
+                std::cout << "##########" << std::endl;
+                std::cout << "Codel   : " << block->codel << std::endl;
+                std::cout << "Exits NL: "
+                    << block->exits[static_cast<size_t>(DC::North)][static_cast<size_t>(CC::Left)] << ' '
+                    << block->exits[static_cast<size_t>(DC::North)][static_cast<size_t>(CC::Right)] << ' '
+                    << block->exits[static_cast<size_t>(DC::East)][static_cast<size_t>(CC::Left)] << ' '
+                    << block->exits[static_cast<size_t>(DC::East)][static_cast<size_t>(CC::Right)] << ' '
+                    << block->exits[static_cast<size_t>(DC::South)][static_cast<size_t>(CC::Left)] << ' '
+                    << block->exits[static_cast<size_t>(DC::South)][static_cast<size_t>(CC::Right)] << ' '
+                    << block->exits[static_cast<size_t>(DC::West)][static_cast<size_t>(CC::Left)] << ' '
+                    << block->exits[static_cast<size_t>(DC::West)][static_cast<size_t>(CC::Right)] << std::endl;
+                std::cout << "Exits Alive: "
+                    << !block->neighbors[static_cast<size_t>(DC::North)][static_cast<size_t>(CC::Left)].block.expired() << ' '
+                    << !block->neighbors[static_cast<size_t>(DC::North)][static_cast<size_t>(CC::Right)].block.expired() << ' '
+                    << !block->neighbors[static_cast<size_t>(DC::East)][static_cast<size_t>(CC::Left)].block.expired() << ' '
+                    << !block->neighbors[static_cast<size_t>(DC::East)][static_cast<size_t>(CC::Right)].block.expired() << ' '
+                    << !block->neighbors[static_cast<size_t>(DC::South)][static_cast<size_t>(CC::Left)].block.expired() << ' '
+                    << !block->neighbors[static_cast<size_t>(DC::South)][static_cast<size_t>(CC::Right)].block.expired() << ' '
+                    << !block->neighbors[static_cast<size_t>(DC::West)][static_cast<size_t>(CC::Left)].block.expired() << ' '
+                    << !block->neighbors[static_cast<size_t>(DC::West)][static_cast<size_t>(CC::Right)].block.expired() << std::endl;
+                std::cout << "Stack   : ";
+                std::copy(std::begin(stack), std::end(stack), std::ostream_iterator<long long int>(std::cout, " "));
+                std::cout << std::endl;
+            }
             // If this block has no neighbors, kill it.
             if (std::all_of(std::begin(block->neighbors), std::end(block->neighbors),
                 [](const std::array<ColorBlock::Neighbor, 2> &arr)
@@ -183,6 +214,10 @@ int main(const int argc, const char **argv)
             bool toggleCC = true;
             while (1)
             {
+                if (trace)
+                {
+                    std::cout << "DC+CC   : " << dc << cc << std::endl;
+                }
                 auto neighbor = block->neighbors[static_cast<size_t>(dc)][static_cast<size_t>(cc)];
                 if (neighbor.block.expired())
                 {
@@ -193,107 +228,112 @@ int main(const int argc, const char **argv)
                     toggleCC = !toggleCC;
                 } else
                 {
-                    std::cout << "Running operation " << static_cast<size_t>(neighbor.operation) << " on " << neighbor.block.lock() << " size " << neighbor.block.lock()->size << " with exit " << std::get<0>(neighbor.block.lock()->exits[0][0]) << "x" << std::get<1>(neighbor.block.lock()->exits[0][0]) << std::endl;
+                    if (trace)
+                    {
+                        std::cout << neighbor.operation << " size " << block->size << std::endl;
+                    }
                     dc = neighbor.dc;
                     cc = neighbor.cc;
                     switch (neighbor.operation)
                     {
                         case OP::PUSH:
                             {
-                                stack.push(block->size);
+                                stack.push_back(block->size);
                                 break;
                             }
                         case OP::POP:
                             if (stack.size() >= 1)
                             {
-                                stack.pop();
+                                stack.pop_back();
                             }
                             break;
                         case OP::ADD:
                             if (stack.size() >= 2)
                             {
-                                const auto first = stack.top();
-                                stack.pop();
-                                const auto second = stack.top();
-                                stack.pop();
-                                stack.push(first + second);
+                                const auto first = stack.back();
+                                stack.pop_back();
+                                const auto second = stack.back();
+                                stack.pop_back();
+                                stack.push_back(first + second);
                             }
                             break;
                         case OP::SUBTRACT:
                             if (stack.size() >= 2)
                             {
-                                const auto first = stack.top();
-                                stack.pop();
-                                const auto second = stack.top();
-                                stack.pop();
-                                stack.push(second - first);
+                                const auto first = stack.back();
+                                stack.pop_back();
+                                const auto second = stack.back();
+                                stack.pop_back();
+                                stack.push_back(second - first);
                             }
                             break;
                         case OP::MULTIPLY:
                             if (stack.size() >= 2)
                             {
-                                const auto first = stack.top();
-                                stack.pop();
-                                const auto second = stack.top();
-                                stack.pop();
-                                stack.push(first * second);
+                                const auto first = stack.back();
+                                stack.pop_back();
+                                const auto second = stack.back();
+                                stack.pop_back();
+                                stack.push_back(first * second);
                             }
                             break;
                         case OP::DIVIDE:
                             if (stack.size() >= 2)
                             {
-                                const auto first = stack.top();
-                                stack.pop();
-                                const auto second = stack.top();
-                                stack.pop();
-                                stack.push(second / first);
+                                const auto first = stack.back();
+                                stack.pop_back();
+                                const auto second = stack.back();
+                                stack.pop_back();
+                                stack.push_back(second / first);
                             }
                             break;
                         case OP::MOD:
                             if (stack.size() >= 2)
                             {
-                                auto first = stack.top();
-                                stack.pop();
-                                auto second = stack.top();
-                                stack.pop();
+                                auto first = stack.back();
+                                stack.pop_back();
+                                auto second = stack.back();
+                                stack.pop_back();
+                                if (first == 0)
+                                {
+                                    stack.push_back(second);
+                                    stack.push_back(first);
+                                    break;
+                                }
 
                                 const bool positive = second >= 0;
-                                if (!positive)
-                                {
-                                    second *= -1;
-                                    first *= -1;
-                                }
                                 auto result = second % first;
-                                if (!positive)
+
+                                if (result < 0 && positive)
                                 {
                                     result *= -1;
                                 }
-                                stack.push(result);
+                                stack.push_back(result);
                             }
                             break;
                         case OP::NOT:
                             if (stack.size() >= 1)
                             {
-                                const auto first = stack.top();
-                                stack.pop();
-                                stack.push(!first);
+                                const auto first = stack.back();
+                                stack.pop_back();
+                                stack.push_back(!first);
                             }
                             break;
                         case OP::GREATER:
                             if (stack.size() >= 2)
                             {
-                                const auto first = stack.top();
-                                stack.pop();
-                                const auto second = stack.top();
-                                stack.pop();
-                                stack.push(second > first);
+                                const auto first = stack.back();
+                                stack.pop_back();
+                                const auto second = stack.back();
+                                stack.pop_back();
+                                stack.push_back(second > first);
                             }
                             break;
                         case OP::POINTER:
                             if (stack.size() >= 1)
                             {
-                                auto first = stack.top();
-                                stack.pop();
+                                auto first = stack.back();
+                                stack.pop_back();
                                 if (first > 0)
                                 {
                                     dc = static_cast<DC>((static_cast<size_t>(dc) + first) % 4);
@@ -307,8 +347,8 @@ int main(const int argc, const char **argv)
                         case OP::SWITCH:
                             if (stack.size() >= 1)
                             {
-                                auto first = stack.top();
-                                stack.pop();
+                                auto first = stack.back();
+                                stack.pop_back();
                                 if (first < 0)
                                 {
                                     first *= -1;
@@ -322,67 +362,62 @@ int main(const int argc, const char **argv)
                         case OP::DUPLICATE:
                             if (stack.size() >= 1)
                             {
-                                stack.push(stack.top());
+                                stack.push_back(stack.back());
                                 break;
                             }
                         case OP::ROLL:
+                            if (stack.size() >= 2)
                             {
-                                auto amount = stack.top();
-                                stack.pop();
-                                auto depth = stack.top();
-                                stack.pop();
+                                auto amount = stack.back();
+                                stack.pop_back();
+                                auto depth = stack.back();
+                                stack.pop_back();
 
-                                if (depth < 0 || static_cast<size_t>(depth) >= stack.size())
+                                if (depth < 0 || static_cast<size_t>(depth) > stack.size())
                                 {
-                                    stack.push(depth);
-                                    stack.push(amount);
-                                } else
+                                    stack.push_back(depth);
+                                    stack.push_back(amount);
+                                } else if (depth > 0)
                                 {
                                     // A roll equal to the depth restores the exact same order
                                     amount %= depth;
 
-                                    // List for rolling
-                                    std::list<long long int> list;
-                                    while (depth--)
-                                    {
-                                        list.push_back(stack.top());
-                                        stack.pop();
-                                    }
-                                    auto newfirst = std::begin(list);
-                                    std::advance(newfirst, amount);
-                                    std::rotate(std::begin(list), newfirst, std::end(list));
-                                    using namespace std::placeholders;
-                                    using Stack = std::stack<long long int>;
-                                    std::for_each(list.crbegin(), list.crend(), std::bind(static_cast<void(Stack::*)(const long long int &)>(&Stack::push), &stack, _1));
+                                    auto rollend = stack.rbegin();
+                                    std::advance(rollend, depth);
+
+                                    auto newtop = stack.rbegin();
+                                    std::advance(newtop, amount);
+
+                                    std::rotate(stack.rbegin(), newtop, rollend);
                                 }
                                 break;
                             }
                         case OP::INN:
                             {
+                                std::cout << args::get(prompt);
                                 long long int input;
                                 std::cin >> input;
-                                stack.push(input);
+                                stack.push_back(input);
                                 break;
                             }
                         case OP::INC:
                             {
-                                char input;
-                                std::cin >> input;
-                                stack.push(input);
+                                std::cout << args::get(prompt);
+                                stack.push_back(std::cin.get());
                                 break;
                             }
                         case OP::OUTN:
                             if (stack.size() >= 1)
                             {
-                                std::cout << stack.top();
-                                stack.pop();
+                                std::cout << stack.back() << std::flush;
+                                stack.pop_back();
                             }
                                 break;
                         case OP::OUTC:
                             if (stack.size() >= 1)
                             {
-                                std::cout << static_cast<char>(stack.top());
-                                stack.pop();
+                                std::cout << static_cast<char>(stack.back()) << std::flush;
+                                stack.pop_back();
                             }
                                 break;
                         case OP::EXIT:
@@ -417,7 +452,7 @@ bool Equals(const Pix &a, const Pix &b)
 }
 
 
-Field ImageToField(const std::string filename, size_t codelsize)
+Field ImageToField(const std::string filename, size_t codelsize, Color unknown)
 {
     Magick::Image image;
 
@@ -505,9 +540,13 @@ Field ImageToField(const std::string filename, size_t codelsize)
             auto colorit = colormap.find(pixelColor);
             if (colorit == colormap.end())
             {
-                std::cerr << "Unknown color found" << std::endl;
-
-                field[realy][realx] = {Shade::None, Color::Unknown};
+                if (unknown == Color::Unknown)
+                {
+                    std::ostringstream problem;
+                    problem << "Could not parse image due to unknown color " << pixelColor << " at " << x << 'x' << y << ".  Please fix image or set unknown to white or black in the options";
+                    throw std::runtime_error(problem.str());
+                }
+                field[realy][realx] = {Shade::None, unknown};
             } else
             {
                 field[realy][realx] = colorit->second;

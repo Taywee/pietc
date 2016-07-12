@@ -6,12 +6,15 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <iomanip>
+#include <iostream>
 #include <list>
 #include <memory>
+#include <set>
+#include <sstream>
 #include <tuple>
 #include <type_traits>
 #include <unordered_map>
-#include <set>
 #include <vector>
 
 #include <Magick++.h>
@@ -25,10 +28,14 @@ enum class DC {
     West
 };
 
+std::ostream & operator<<(std::ostream &os, const DC dc);
+
 enum class CC {
     Left,
     Right
 };
+
+std::ostream & operator<<(std::ostream &os, const CC cc);
 
 enum class OP {
     NOP,
@@ -52,6 +59,8 @@ enum class OP {
     EXIT
 };
 
+std::ostream & operator<<(std::ostream &os, const OP op);
+
 const static std::array<std::array<OP, 3>, 6> OpTable {{
     {{OP::NOP, OP::PUSH, OP::POP}},
     {{OP::ADD, OP::SUBTRACT, OP::MULTIPLY}},
@@ -73,12 +82,16 @@ enum class Color {
     Unknown // Not used in final output.  Compiler will decide what to do with this.
 };
 
+std::ostream & operator<<(std::ostream &os, const Color color);
+
 enum class Shade {
     Light,
     Normal,
     Dark,
     None
 };
+
+std::ostream & operator<<(std::ostream &os, const Shade shade);
 
 struct Codel {
     Shade shade;
@@ -97,6 +110,8 @@ struct Codel {
         };
     }
 };
+
+std::ostream & operator<<(std::ostream &os, const Codel &codel);
 
 using Field = std::vector<std::vector<Codel>>;
 
@@ -126,6 +141,8 @@ struct PixelColor {
     }
 };
 
+std::ostream & operator<<(std::ostream &os, const PixelColor &color);
+
 namespace std
 {
     template<> struct hash<PixelColor>
@@ -143,6 +160,8 @@ namespace std
 }
 
 using Coords = std::tuple<std::size_t, std::size_t>;
+
+std::ostream & operator<<(std::ostream &os, const Coords &coords);
 
 namespace std
 {
@@ -452,3 +471,178 @@ std::tuple<std::shared_ptr<ColorBlock>, DC, CC, bool> TraceWhite(Coords coords, 
     }
 }
 
+std::ostream & operator<<(std::ostream &os, const DC dc)
+{
+    switch (dc)
+    {
+        case DC::North:
+            os << 'N';
+            break;
+        case DC::East:
+            os << 'E';
+            break;
+        case DC::South:
+            os << 'S';
+            break;
+        case DC::West:
+            os << 'W';
+            break;
+        default:
+            os << '?';
+            break;
+    }
+    return os;
+}
+
+std::ostream & operator<<(std::ostream &os, const OP op)
+{
+    switch (op)
+    {
+        case OP::NOP:
+            os << "NOP";
+            break;
+        case OP::PUSH:
+            os << "PUSH";
+            break;
+        case OP::POP:
+            os << "POP";
+            break;
+        case OP::ADD:
+            os << "ADD";
+            break;
+        case OP::SUBTRACT:
+            os << "SUBTRACT";
+            break;
+        case OP::MULTIPLY:
+            os << "MULTIPLY";
+            break;
+        case OP::DIVIDE:
+            os << "DIVIDE";
+            break;
+        case OP::MOD:
+            os << "MOD";
+            break;
+        case OP::NOT:
+            os << "NOT";
+            break;
+        case OP::GREATER:
+            os << "GREATER";
+            break;
+        case OP::POINTER:
+            os << "POINTER";
+            break;
+        case OP::SWITCH:
+            os << "SWITCH";
+            break;
+        case OP::DUPLICATE:
+            os << "DUPLICATE";
+            break;
+        case OP::ROLL:
+            os << "ROLL";
+            break;
+        case OP::INN:
+            os << "INN";
+            break;
+        case OP::INC:
+            os << "INC";
+            break;
+        case OP::OUTN:
+            os << "OUTN";
+            break;
+        case OP::OUTC:
+            os << "OUTC";
+            break;
+        case OP::EXIT:
+            os << "EXIT";
+            break;
+        default:
+            os << '?';
+            break;
+    }
+    return os;
+}
+std::ostream & operator<<(std::ostream &os, const CC cc)
+{
+    switch (cc)
+    {
+        case CC::Left:
+            os << 'L';
+            break;
+        case CC::Right:
+            os << 'R';
+            break;
+        default:
+            os << '?';
+            break;
+    }
+    return os;
+}
+
+std::ostream & operator<<(std::ostream &os, const Color color)
+{
+    switch (color)
+    {
+        case Color::Red:
+            os << 'R';
+            break;
+        case Color::Yellow:
+            os << 'Y';
+            break;
+        case Color::Green:
+            os << 'G';
+            break;
+        case Color::Cyan:
+            os << 'C';
+            break;
+        case Color::Blue:
+            os << 'B';
+            break;
+        case Color::Magenta:
+            os << 'M';
+            break;
+        default:
+            os << '?';
+            break;
+    }
+    return os;
+}
+
+std::ostream & operator<<(std::ostream &os, const Shade shade)
+{
+    switch (shade)
+    {
+        case Shade::Light:
+            os << 'L';
+            break;
+        case Shade::Normal:
+            os << 'N';
+            break;
+        case Shade::Dark:
+            os << 'D';
+            break;
+        default:
+            os << '?';
+            break;
+    }
+    return os;
+}
+
+std::ostream & operator<<(std::ostream &os, const Codel &codel)
+{
+    os << codel.shade << codel.color;
+    return os;
+}
+
+std::ostream & operator<<(std::ostream &os, const Coords &coords)
+{
+    os << std::get<0>(coords) << 'x' << std::get<1>(coords);
+    return os;
+}
+
+std::ostream & operator<<(std::ostream &os, const PixelColor &color)
+{
+    std::ostringstream ss;
+    ss << std::hex << std::setfill('0') << std::setw(2) << static_cast<unsigned int>(color.red) << std::setw(2) << static_cast<unsigned int>(color.green) << std::setw(2) << static_cast<unsigned int>(color.blue);
+    os << ss.str();
+    return os;
+}
