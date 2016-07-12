@@ -3,7 +3,6 @@
  */
 
 #include <array>
-#include <iostream>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -12,14 +11,17 @@
 #include <tuple>
 #include <type_traits>
 #include <unordered_map>
+#include <set>
 #include <vector>
 
 #include <Magick++.h>
 
+using std::size_t;
+
 enum class DC {
     North,
-    South,
     East,
+    South,
     West
 };
 
@@ -46,7 +48,8 @@ enum class OP {
     INN,
     INC,
     OUTN,
-    OUTC
+    OUTC,
+    EXIT
 };
 
 const static std::array<std::array<OP, 3>, 6> OpTable {{
@@ -84,30 +87,18 @@ struct Codel {
     {
         return color == other.color && shade == other.shade;
     }
+
+    // One-directional difference between two full codels with wraparound
+    Codel operator-(const Codel &other) const
+    {
+        return {
+            static_cast<Shade>((static_cast<size_t>(shade) + 3 - static_cast<size_t>(other.shade)) % 3),
+            static_cast<Color>((static_cast<size_t>(color) + 6 - static_cast<size_t>(other.color)) % 6)
+        };
+    }
 };
 
 using Field = std::vector<std::vector<Codel>>;
-
-
-// One-directional between colors with wraparound
-Color Difference(Color from, Color to)
-{
-    using Type = std::underlying_type<Color>::type;
-    return static_cast<Color>((static_cast<Type>(to) + 6 - static_cast<Type>(from)) % 6);
-}
-
-// One-directional between shades with wraparound
-Shade Difference(Shade from, Shade to)
-{
-    using Type = std::underlying_type<Shade>::type;
-    return static_cast<Shade>((static_cast<Type>(to) + 3 - static_cast<Type>(from)) % 3);
-}
-
-// One-directional difference between two full codels with wraparound
-Codel Difference(const Codel &from, const Codel &to)
-{
-    return {Difference(from.shade, to.shade), Difference(from.color, to.color)};
-}
 
 using std::uint8_t;
 
@@ -178,14 +169,21 @@ struct ColorBlock;
 using Map = std::unordered_map<Coords, std::shared_ptr<ColorBlock>>;
 using MapItem = std::pair<const Coords, std::shared_ptr<ColorBlock>>;
 
+static std::tuple<std::shared_ptr<ColorBlock>, DC, CC, bool> TraceWhite(Coords coords, const Field &field, Map &map, DC dc, CC cc);
 
 struct ColorBlock
 {
     const Codel codel;
     const size_t size;
     std::array<std::array<Coords, 2>, 4> exits;
-
-    std::array<std::array<std::weak_ptr<ColorBlock>, 2>, 4> neighbors;
+    struct Neighbor
+    {
+        std::weak_ptr<ColorBlock> block;
+        OP operation;
+        DC dc;
+        CC cc;
+    };
+    std::array<std::array<Neighbor, 2>, 4> neighbors;
 
     ColorBlock(const ColorBlock &other) : codel(other.codel), size(other.size)
     {
@@ -212,71 +210,245 @@ struct ColorBlock
             extremes[static_cast<size_t>(DC::South)] = std::get<1>(*std::max_element(std::begin(codels), std::end(codels), Compare<1>));
             extremes[static_cast<size_t>(DC::North)] = std::get<1>(*std::min_element(std::begin(codels), std::end(codels), Compare<1>));
 
+            List easts;
+            List wests;
+            List norths;
+            List souths;
+
+            std::copy_if(std::begin(codels), std::end(codels), std::back_inserter(easts),
+                [&extremes](const Coords &coord)
+                {
+                    return extremes[static_cast<size_t>(DC::East)] == std::get<0>(coord);
+                });
+
+            std::copy_if(std::begin(codels), std::end(codels), std::back_inserter(wests),
+                [&extremes](const Coords &coord)
+                {
+                    return extremes[static_cast<size_t>(DC::West)] == std::get<0>(coord);
+                });
+
+            std::copy_if(std::begin(codels), std::end(codels), std::back_inserter(norths),
+                [&extremes](const Coords &coord)
+                {
+                    return extremes[static_cast<size_t>(DC::North)] == std::get<1>(coord);
+                });
+
+            std::copy_if(std::begin(codels), std::end(codels), std::back_inserter(souths),
+                [&extremes](const Coords &coord)
+                {
+                    return extremes[static_cast<size_t>(DC::South)] == std::get<1>(coord);
+                });
+
             // Get L and R values for each extreme
             // East
-            auto end = std::remove_if(std::begin(codels), std::end(codels), [&extremes](const Coords &coord) -> bool {
-                return extremes[static_cast<size_t>(DC::East)] != std::get<0>(coord);
-                });
             // L is the far north side when facing East (far north is the LOWEST Y)
-            exits[static_cast<size_t>(DC::East)][static_cast<size_t>(CC::Left)] = *std::min_element(std::begin(codels), end, Compare<1>);
+            exits[static_cast<size_t>(DC::East)][static_cast<size_t>(CC::Left)] = *std::min_element(std::begin(easts), std::end(easts), Compare<1>);
             // R is the far south side when facing East (far south is the HIGHEST Y)
-            exits[static_cast<size_t>(DC::East)][static_cast<size_t>(CC::Right)] = *std::max_element(std::begin(codels), end, Compare<1>);
+            exits[static_cast<size_t>(DC::East)][static_cast<size_t>(CC::Right)] = *std::max_element(std::begin(easts), std::end(easts), Compare<1>);
 
             // West
-            end = std::remove_if(std::begin(codels), std::end(codels), [&extremes](const Coords &coord) -> bool {
-                return extremes[static_cast<size_t>(DC::West)] != std::get<0>(coord);
-                });
             // L is the far south side when facing West
-            exits[static_cast<size_t>(DC::West)][static_cast<size_t>(CC::Left)] = *std::max_element(std::begin(codels), end, Compare<1>);
+            exits[static_cast<size_t>(DC::West)][static_cast<size_t>(CC::Left)] = *std::max_element(std::begin(wests), std::end(wests), Compare<1>);
             // R is the far north side when facing West
-            exits[static_cast<size_t>(DC::West)][static_cast<size_t>(CC::Right)] = *std::min_element(std::begin(codels), end, Compare<1>);
+            exits[static_cast<size_t>(DC::West)][static_cast<size_t>(CC::Right)] = *std::min_element(std::begin(wests), std::end(wests), Compare<1>);
 
             // North
-            end = std::remove_if(std::begin(codels), std::end(codels), [&extremes](const Coords &coord) -> bool {
-                return extremes[static_cast<size_t>(DC::North)] != std::get<1>(coord);
-                });
             // L is the far west side when facing North
-            exits[static_cast<size_t>(DC::North)][static_cast<size_t>(CC::Left)] = *std::min_element(std::begin(codels), end, Compare<0>);
+            exits[static_cast<size_t>(DC::North)][static_cast<size_t>(CC::Left)] = *std::min_element(std::begin(norths), std::end(norths), Compare<0>);
             // R is the far east side when facing North
-            exits[static_cast<size_t>(DC::North)][static_cast<size_t>(CC::Right)] = *std::max_element(std::begin(codels), end, Compare<0>);
+            exits[static_cast<size_t>(DC::North)][static_cast<size_t>(CC::Right)] = *std::max_element(std::begin(norths), std::end(norths), Compare<0>);
 
             // South
-            end = std::remove_if(std::begin(codels), std::end(codels), [&extremes](const Coords &coord) -> bool {
-                return extremes[static_cast<size_t>(DC::South)] != std::get<1>(coord);
-                });
             // L is the far east side when facing South
-            exits[static_cast<size_t>(DC::South)][static_cast<size_t>(CC::Left)] = *std::max_element(std::begin(codels), end, Compare<0>);
+            exits[static_cast<size_t>(DC::South)][static_cast<size_t>(CC::Left)] = *std::max_element(std::begin(souths), std::end(souths), Compare<0>);
             // R is the far west side when facing South
-            exits[static_cast<size_t>(DC::South)][static_cast<size_t>(CC::Right)] = *std::min_element(std::begin(codels), end, Compare<0>);
+            exits[static_cast<size_t>(DC::South)][static_cast<size_t>(CC::Right)] = *std::min_element(std::begin(souths), std::end(souths), Compare<0>);
         }
     }
 
     void SetNeighbors(const Field &field, Map &map)
     {
-        const auto &el = exits[static_cast<size_t>(DC::East)][static_cast<size_t>(CC::Left)];
-        const auto &er = exits[static_cast<size_t>(DC::East)][static_cast<size_t>(CC::Right)];
-        const auto &nl = exits[static_cast<size_t>(DC::North)][static_cast<size_t>(CC::Left)];
-        const auto &nr = exits[static_cast<size_t>(DC::North)][static_cast<size_t>(CC::Right)];
-        const auto &wl = exits[static_cast<size_t>(DC::West)][static_cast<size_t>(CC::Left)];
-        const auto &wr = exits[static_cast<size_t>(DC::West)][static_cast<size_t>(CC::Right)];
-        const auto &sl = exits[static_cast<size_t>(DC::South)][static_cast<size_t>(CC::Left)];
-        const auto &sr = exits[static_cast<size_t>(DC::South)][static_cast<size_t>(CC::Right)];
-        if (std::get<0>(el) < field.size() - 1)
+        const static auto GetNeighbor = [&field, &map](const Coords &coords, const Codel &codel, const DC dc, const CC cc)
         {
-            const auto l = std::make_tuple(std::get<0>(el) + 1, std::get<1>(el));
-            const auto r = std::make_tuple(std::get<0>(er) + 1, std::get<1>(er));
-            const auto dl = map.find(l)->second;
-            const auto dr = map.find(r)->second;
-
-            switch (dl->codel.color)
+            auto neighbor = map.find(coords)->second;
+            switch (neighbor->codel.color)
             {
                 case Color::Black:
+                    return Neighbor{{}, OP::NOP, DC::North, CC::Left};
                     break;
                 case Color::White:
-                    neighbors[static_cast<size_t>(DC::East)][static_cast<size_t>(CC::Left)] = TraceWhite(l, field, map, DC::East, CC::Left);
-                    break;
+                    {
+                        std::shared_ptr<ColorBlock> neighbor;
+                        DC ndc;
+                        CC ncc;
+                        bool exit;
+                        std::tie(neighbor, ndc, ncc, exit) = TraceWhite(coords, field, map, dc, cc);
+
+                        return Neighbor{neighbor, (exit? OP::EXIT : OP::NOP), ndc, ncc};
+                        break;
+                    }
+                default:
+                    {
+                        auto diff = neighbor->codel - codel;
+
+                        return Neighbor{neighbor, OpTable[static_cast<size_t>(diff.color)][static_cast<size_t>(diff.shade)], dc, cc};
+                        break;
+                    }
+            }
+        };
+
+        {
+            const auto &el = exits[static_cast<size_t>(DC::East)][static_cast<size_t>(CC::Left)];
+            const auto &er = exits[static_cast<size_t>(DC::East)][static_cast<size_t>(CC::Right)];
+            if (std::get<0>(el) < field[0].size() - 1)
+            {
+                const auto l = std::make_tuple(std::get<0>(el) + 1, std::get<1>(el));
+                const auto r = std::make_tuple(std::get<0>(er) + 1, std::get<1>(er));
+                neighbors[static_cast<size_t>(DC::East)][static_cast<size_t>(CC::Left)] = GetNeighbor(l, codel, DC::East, CC::Left);
+                neighbors[static_cast<size_t>(DC::East)][static_cast<size_t>(CC::Right)] = GetNeighbor(r, codel, DC::East, CC::Right);
+            }
+        }
+        {
+            const auto &sl = exits[static_cast<size_t>(DC::South)][static_cast<size_t>(CC::Left)];
+            const auto &sr = exits[static_cast<size_t>(DC::South)][static_cast<size_t>(CC::Right)];
+            if (std::get<1>(sl) < (field.size() - 1))
+            {
+                const auto l = std::make_tuple(std::get<0>(sl), std::get<1>(sl) + 1);
+                const auto r = std::make_tuple(std::get<0>(sr), std::get<1>(sr) + 1);
+                neighbors[static_cast<size_t>(DC::South)][static_cast<size_t>(CC::Left)] = GetNeighbor(l, codel, DC::South, CC::Left);
+                neighbors[static_cast<size_t>(DC::South)][static_cast<size_t>(CC::Right)] = GetNeighbor(r, codel, DC::South, CC::Right);
+            }
+        }
+        {
+            const auto &wl = exits[static_cast<size_t>(DC::West)][static_cast<size_t>(CC::Left)];
+            const auto &wr = exits[static_cast<size_t>(DC::West)][static_cast<size_t>(CC::Right)];
+            if (std::get<0>(wl) > 0)
+            {
+                const auto l = std::make_tuple(std::get<0>(wl) - 1, std::get<1>(wl));
+                const auto r = std::make_tuple(std::get<0>(wr) - 1, std::get<1>(wr));
+                neighbors[static_cast<size_t>(DC::West)][static_cast<size_t>(CC::Left)] = GetNeighbor(l, codel, DC::West, CC::Left);
+                neighbors[static_cast<size_t>(DC::West)][static_cast<size_t>(CC::Right)] = GetNeighbor(r, codel, DC::West, CC::Right);
+            }
+        }
+        {
+            const auto &nl = exits[static_cast<size_t>(DC::North)][static_cast<size_t>(CC::Left)];
+            const auto &nr = exits[static_cast<size_t>(DC::North)][static_cast<size_t>(CC::Right)];
+            if (std::get<1>(nl) > 0)
+            {
+                const auto l = std::make_tuple(std::get<0>(nl), std::get<1>(nl) - 1);
+                const auto r = std::make_tuple(std::get<0>(nr), std::get<1>(nr) - 1);
+                neighbors[static_cast<size_t>(DC::North)][static_cast<size_t>(CC::Left)] = GetNeighbor(l, codel, DC::North, CC::Left);
+                neighbors[static_cast<size_t>(DC::North)][static_cast<size_t>(CC::Right)] = GetNeighbor(r, codel, DC::North, CC::Right);
             }
         }
     }
 };
+
+inline CC Toggle(CC cc)
+{
+    switch (cc)
+    {
+        case CC::Left:
+            return CC::Right;
+            break;
+        case CC::Right:
+            return CC::Left;
+            break;
+    }
+}
+
+inline DC Toggle(DC dc)
+{
+    switch (dc)
+    {
+        case DC::North:
+            return DC::East;
+            break;
+        case DC::East:
+            return DC::South;
+            break;
+        case DC::South:
+            return DC::West;
+            break;
+        case DC::West:
+            return DC::North;
+            break;
+    }
+}
+
+// Walk through whites until you either hit a color block or you start re-walking your steps
+std::tuple<std::shared_ptr<ColorBlock>, DC, CC, bool> TraceWhite(Coords coords, const Field &field, Map &map, DC dc, CC cc)
+{
+    using BlockMove = std::tuple<Coords, DC, CC>;
+    using Traversed = std::set<BlockMove>;
+    Traversed traversed;
+
+    while (1)
+    {
+        Traversed::iterator it;
+        bool inserted;
+        std::tie(it, inserted) = traversed.insert(BlockMove(coords, dc, cc));
+        if (inserted)
+        {
+            Coords next;
+            bool restricted = false;
+            switch (dc)
+            {
+                case DC::North:
+                    if (std::get<1>(coords) > 0)
+                        next = std::make_tuple(std::get<0>(coords), std::get<1>(coords) - 1);
+                    else
+                        restricted = true;
+                    break;
+                case DC::East:
+                    if (std::get<0>(coords) < (field[0].size() - 1))
+                        next = std::make_tuple(std::get<0>(coords) + 1, std::get<1>(coords));
+                    else
+                        restricted = true;
+                    break;
+                case DC::South:
+                    if (std::get<1>(coords) < (field.size() - 1))
+                        next = std::make_tuple(std::get<0>(coords), std::get<1>(coords) + 1);
+                    else
+                        restricted = true;
+                    break;
+                case DC::West:
+                    if (std::get<0>(coords) > 0)
+                        next = std::make_tuple(std::get<0>(coords) - 1, std::get<1>(coords));
+                    else
+                        restricted = true;
+                    break;
+            }
+            if (!restricted)
+            {
+                auto nextblock = map.find(next)->second;
+                switch (nextblock->codel.color)
+                {
+                    case Color::Black:
+                        restricted = true;
+                        break;
+                    case Color::White:
+                        restricted = false;
+                        break;
+                    default:
+                        return std::make_tuple(std::shared_ptr<ColorBlock>{nextblock}, dc, cc, false);
+                }
+            }
+
+            // This "redundant" check is necessary, because the "next" value
+            // can change the restricted status
+            if (restricted)
+            {
+                dc = Toggle(dc);
+                cc = Toggle(cc);
+            } else
+            {
+                coords = next;
+            }
+        } else
+        {
+            return std::make_tuple(std::shared_ptr<ColorBlock>{}, dc, cc, true);
+        }
+    }
+}
 
