@@ -193,6 +193,7 @@ int main(const int argc, const char **argv)
                     toggleCC = !toggleCC;
                 } else
                 {
+                    std::cout << "Running operation " << static_cast<size_t>(neighbor.operation) << " on " << neighbor.block.lock() << " size " << neighbor.block.lock()->size << " with exit " << std::get<0>(neighbor.block.lock()->exits[0][0]) << "x" << std::get<1>(neighbor.block.lock()->exits[0][0]) << std::endl;
                     dc = neighbor.dc;
                     cc = neighbor.cc;
                     switch (neighbor.operation)
