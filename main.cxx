@@ -17,10 +17,8 @@
 
 #include "color.hxx"
 
-using Field = std::vector<std::vector<Codel>>;
-
 static Field ImageToField(const std::string filename, size_t codelsize);
-static void PrintField(const Field &field, const std::unordered_map<Coords, std::shared_ptr<ColorBlock>> &map);
+static void PrintField(const Field &field, const Map &map);
 
 int main(const int argc, const char **argv)
 {
@@ -59,7 +57,7 @@ int main(const int argc, const char **argv)
 
     try {
         const Field field = ImageToField(args::get(input), args::get(cs));
-        std::unordered_map<Coords, std::shared_ptr<ColorBlock>> map;
+        Map map;
 
         for (size_t y = 0; y < field.size(); ++y)
         {
@@ -139,7 +137,12 @@ int main(const int argc, const char **argv)
         // * do determinations on which color blocks and white directions are program exits
         // * Once this is done, the graphical image is no longer necessary and may be thrown away
         // * generate a sort of AST (but more of an Abstract Syntax Map, as the program is 2D) for use with code generation
-        PrintField(field, map);
+        std::unordered_set<std::shared_ptr<ColorBlock>> colorBlocks;
+        std::transform(std::begin(map), std::end(map), std::inserter(colorBlocks, std::end(colorBlocks)), [](const MapItem &item) {return item.second;});
+
+        // Call setneighbors
+        using namespace std::placeholders;
+        std::for_each(std::begin(colorBlocks), std::end(colorBlocks), std::bind(&ColorBlock::SetNeighbors, _1, field, map));
     }
     catch (const Magick::Exception &e)
     {
@@ -260,7 +263,7 @@ Field ImageToField(const std::string filename, size_t codelsize)
 }
 
 
-void PrintField(const Field &field, const std::unordered_map<Coords, std::shared_ptr<ColorBlock>> &map)
+void PrintField(const Field &field, const Map &map)
 {
     for (size_t y = 0; y < field.size(); ++y)
     {
