@@ -45,7 +45,7 @@ int main(const int argc, const char **argv)
     //args::Flag trace(parser, "trace", "Trace program run", {'t', "trace"});
     args::Flag unknownWhite(parser, "unknown-white", "Make unknown colors white", {"unknown-white"});
     args::Flag unknownBlack(parser, "unknown-black", "Make unknown colors black", {"unknown-black"});
-    args::ValueFlag<size_t> startstacksize(parser, "size", "Specify the starting stack size", {'s', "stack"}, 64);
+    args::ValueFlag<size_t> startstacksize(parser, "size", "Specify the starting stack size", {'s', "stack"}, 1);
     args::ValueFlag<std::string> prompt(parser, "prompt", "Prompt for input operations", {'p', "prompt"}, "? ");
     args::Group required(parser, "", args::Group::Validators::All);
     args::Positional<std::string> input(required, "input", "Input file to use");
@@ -53,6 +53,10 @@ int main(const int argc, const char **argv)
     try
     {
         parser.ParseCLI(argc, argv);
+        if (args::get(startstacksize) < 1)
+        {
+            args::get(startstacksize) = 1;
+        }
     }
     catch (const args::Help &)
     {
@@ -228,14 +232,78 @@ int main(const int argc, const char **argv)
 
         //popstack
         // value, stack, pointer to current stack size
-        llvm::FunctionType *popstacktype = llvm::FunctionType::get(llvm::Type::getInt64Ty(context), {llvm::PointerType::get(llvm::Type::getInt64PtrTy(context), 0), llvm::Type::getInt64PtrTy(context)}, false);
+        llvm::FunctionType *popstacktype = llvm::FunctionType::get(llvm::Type::getInt64Ty(context), {llvm::Type::getInt64PtrTy(context), llvm::Type::getInt64PtrTy(context)}, false);
         llvm::Function *popstack = llvm::Function::Create(popstacktype, llvm::Function::InternalLinkage, "popstack", &module);
-        std::vector<llvm::Value *> popstackargs(std::begin(popstack->args()), std::end(popstack->args()));
+        {
+            llvm::BasicBlock *bb = llvm::BasicBlock::Create(context, "", popstack);
+            builder.SetInsertPoint(bb);
+            std::vector<llvm::Value*> args;
+            for (auto &arg: popstack->args())
+            {
+                args.push_back(&arg);
+            }
+            auto stack = args[0];
+            auto stacksize = args[1];
 
-        //pushstack
-        // value, stack, pointer to current stack size
-        llvm::FunctionType *pushstacktype = llvm::FunctionType::get(llvm::Type::getVoidTy(context), {llvm::Type::getInt64Ty(context), llvm::PointerType::get(llvm::Type::getInt64PtrTy(context), 0), llvm::Type::getInt64PtrTy(context)}, false);
+            auto empty = llvm::BasicBlock::Create(context, "empty", popstack);
+            auto nempty = llvm::BasicBlock::Create(context, "nempty", popstack);
+
+            auto cond = builder.CreateICmpEQ(builder.getInt64(0), builder.CreateLoad(stacksize));
+            builder.CreateCondBr(cond, empty, nempty);
+
+            {
+                builder.SetInsertPoint(empty);
+                builder.CreateRet(builder.getInt64(0));
+            }
+            {
+                builder.SetInsertPoint(nempty);
+                builder.CreateStore(builder.CreateSub(builder.CreateLoad(stacksize), builder.getInt64(1)), stacksize);
+                builder.CreateRet(builder.CreateLoad(builder.CreateGEP(stack, builder.CreateLoad(stacksize))));
+            }
+        }
+
+        ////pushstack
+        //// value, stack, pointer to current stack size, pointer to stack reserved size
+        llvm::FunctionType *pushstacktype = llvm::FunctionType::get(llvm::Type::getVoidTy(context), {llvm::Type::getInt64Ty(context), llvm::PointerType::get(llvm::Type::getInt64PtrTy(context), 0), llvm::Type::getInt64PtrTy(context), llvm::Type::getInt64PtrTy(context)}, false);
         llvm::Function *pushstack = llvm::Function::Create(pushstacktype, llvm::Function::InternalLinkage, "pushstack", &module);
+        {
+            llvm::BasicBlock *bb = llvm::BasicBlock::Create(context, "", pushstack);
+            builder.SetInsertPoint(bb);
+            std::vector<llvm::Value*> args;
+            for (auto &arg: pushstack->args())
+            {
+                args.push_back(&arg);
+            }
+            auto value = args[0];
+            value->setName("value");
+            auto stack = args[1];
+            stack->setName("stack");
+            auto stacksize = args[2];
+            stacksize->setName("stacksize");
+            auto reservedsize = args[3];
+            reservedsize->setName("reservedsize");
+
+            auto full = llvm::BasicBlock::Create(context, "full", pushstack);
+            auto push = llvm::BasicBlock::Create(context, "push", pushstack);
+
+            // The stack is full
+            auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), builder.CreateLoad(reservedsize));
+            builder.CreateCondBr(cond, full, push);
+
+            {
+                builder.SetInsertPoint(full);
+                builder.CreateStore(builder.CreateMul(builder.CreateLoad(reservedsize), builder.getInt64(2)), reservedsize);
+                llvm::Value *realcall = builder.CreateCall(realloc, {builder.CreateLoad(stack), builder.CreateMul(builder.CreateLoad(reservedsize), builder.getInt64(sizeof(size_t)))});
+                builder.CreateStore(realcall, stack, false);
+                builder.CreateBr(push);
+            }
+            {
+                builder.SetInsertPoint(push);
+                builder.CreateStore(value, builder.CreateGEP(builder.CreateLoad(stack), builder.CreateLoad(stacksize)));
+                builder.CreateStore(builder.CreateAdd(builder.CreateLoad(stacksize), builder.getInt64(1)), stacksize);
+                builder.CreateRetVoid();
+            }
+        }
 
         llvm::FunctionType *mainType = llvm::FunctionType::get(llvm::Type::getInt32Ty(context), false);
         llvm::Constant* mainC = module.getOrInsertFunction("main", mainType);
@@ -245,16 +313,17 @@ int main(const int argc, const char **argv)
         builder.SetInsertPoint(bb);
 
         llvm::AllocaInst *dcalloc = builder.CreateAlloca(llvm::Type::getInt8Ty(context), 0, "dc");
-        llvm::AllocaInst *ccalloc = builder.CreateAlloca(llvm::Type::getInt1Ty(context), 0, "cc");
+        auto i1 = llvm::Type::getInt1Ty(context);
+        llvm::AllocaInst *ccalloc = builder.CreateAlloca(i1, 0, "cc");
         llvm::AllocaInst *stackalloc = builder.CreateAlloca(llvm::Type::getInt64PtrTy(context), 0, "stack");
         llvm::AllocaInst *stacksize = builder.CreateAlloca(sizet_type, 0, "stacksize");
         llvm::AllocaInst *stackreserved = builder.CreateAlloca(sizet_type, 0, "stackreserved");
-        llvm::Value *realcall = builder.CreateCall(realloc, {llvm::ConstantPointerNull::get(llvm::Type::getInt64PtrTy(context)), llvm::ConstantInt::get(sizet_type, args::get(startstacksize))});
+        llvm::Value *realcall = builder.CreateCall(realloc, {llvm::ConstantPointerNull::get(llvm::Type::getInt64PtrTy(context)), llvm::ConstantInt::get(sizet_type, args::get(startstacksize) * sizeof(size_t))});
         builder.CreateStore(realcall, stackalloc, false);
         builder.CreateStore(llvm::ConstantInt::get(sizet_type, 0), stacksize, false);
         builder.CreateStore(llvm::ConstantInt::get(sizet_type, args::get(startstacksize)), stackreserved, false);
-        //llvm::Value *printdigit = builder.CreateGlobalStringPtr("%lld\n");
-        //builder.CreateCall(printf, {printdigit, llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), args::get(startstacksize))});
+        llvm::Value *printdigit = builder.CreateGlobalStringPtr("stack size: %llu, reserved: %llu\n");
+        llvm::Value *printresult = builder.CreateGlobalStringPtr("stack size: %llu, reserved: %llu, retvalue: %llu\n");
         auto blank = llvm::BasicBlock::Create(context, "blank", mainFunc);
         llvm::ReturnInst::Create(context, llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0), blank);
 
@@ -281,7 +350,7 @@ int main(const int argc, const char **argv)
         {
             // first set dc and cc
             builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(startdc)), dcalloc, false);
-            builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt1Ty(context), static_cast<uint8_t>(startcc)), ccalloc, false);
+            builder.CreateStore(llvm::ConstantInt::get(i1, static_cast<uint8_t>(startcc)), ccalloc, false);
 
             std::map<std::shared_ptr<ColorBlock>, llvm::BasicBlock*> blocks;
             for (auto &colorBlock: map)
@@ -365,23 +434,23 @@ int main(const int argc, const char **argv)
                     return neighbor;
                 };
 
-                std::map<ColorBlock::Neighbor, std::list<std::tuple<DC, CC>>> neighbors;
-                std::map<std::tuple<DC, CC>, ColorBlock::Neighbor> rneighbors;
+                std::map<ColorBlock::Neighbor *, std::list<std::tuple<DC, CC>>> neighbors;
+                std::map<std::tuple<DC, CC>, ColorBlock::Neighbor *> rneighbors;
                 for (auto dc: std::list<DC>{DC::North, DC::East, DC::South, DC::West})
                 {
                     for (auto cc: std::list<CC>{CC::Left, CC::Right})
                     {
                         auto &neighbor = getNeighbor(block->neighbors, dc, cc);
-                        neighbors[neighbor].emplace_back(dc, cc);
-                        rneighbors.emplace(std::tuple<DC, CC>{dc, cc}, neighbor);
+                        neighbors[&neighbor].emplace_back(dc, cc);
+                        rneighbors.emplace(std::tuple<DC, CC>{dc, cc}, &neighbor);
                     }
                 }
-                std::map<ColorBlock::Neighbor, llvm::BasicBlock*> neighborbbs;
+                std::map<ColorBlock::Neighbor *, llvm::BasicBlock*> neighborbbs;
                 for(auto &n: neighbors)
                 {
-                    auto &neighbor = n.first;
+                    auto neighbor = n.first;
                     std::ostringstream name;
-                    name << "neighbor_" << neighbor.dc << neighbor.cc;
+                    name << "neighbor_" << neighbor->dc << neighbor->cc;
                     neighborbbs.emplace(neighbor, llvm::BasicBlock::Create(context, name.str(), mainFunc));
                 }
 
@@ -389,18 +458,18 @@ int main(const int argc, const char **argv)
                 auto right = llvm::BasicBlock::Create(context, "right", mainFunc);
 
                 // Check if cc is left
-                auto cond = builder.CreateICmpEQ(llvm::ConstantInt::get(llvm::Type::getInt1Ty(context), static_cast<uint8_t>(CC::Left)), ccalloc);
+                auto cond = builder.CreateICmpEQ(builder.getInt1(static_cast<uint8_t>(CC::Left)), builder.CreateLoad(ccalloc));
 
                 // Link all cc and dc combos to matching neighbors
-                auto br = builder.CreateCondBr(cond, left, right);
+                builder.CreateCondBr(cond, left, right);
                 builder.SetInsertPoint(left);
-                auto lsw = builder.CreateSwitch(dcalloc, blank, 4);
+                auto lsw = builder.CreateSwitch(builder.CreateLoad(dcalloc), blank, 4);
                 lsw->addCase(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::North)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::North, CC::Left})->second)->second);
                 lsw->addCase(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::East)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::East, CC::Left})->second)->second);
                 lsw->addCase(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::South)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::South, CC::Left})->second)->second);
                 lsw->addCase(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::West)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::West, CC::Left})->second)->second);
                 builder.SetInsertPoint(right);
-                auto rsw = builder.CreateSwitch(dcalloc, blank, 4);
+                auto rsw = builder.CreateSwitch(builder.CreateLoad(dcalloc), blank, 4);
                 rsw->addCase(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::North)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::North, CC::Right})->second)->second);
                 rsw->addCase(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::East)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::East, CC::Right})->second)->second);
                 rsw->addCase(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::South)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::South, CC::Right})->second)->second);
@@ -408,26 +477,24 @@ int main(const int argc, const char **argv)
                 
                 for(auto &n: neighbors)
                 {
-                    auto &neighbor = n.first;
+                    auto &neighbor = *n.first;
                     auto newdc = neighbor.dc;
                     auto newcc = neighbor.cc;
-                    auto bb = neighborbbs.find(neighbor)->second;
+                    auto bb = neighborbbs.find(&neighbor)->second;
+                    auto nextbb = blocks.find(neighbor.block.lock())->second;
                     builder.SetInsertPoint(bb);
+                    builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(newdc)), dcalloc);
+                    builder.CreateStore(llvm::ConstantInt::get(i1, static_cast<uint8_t>(newcc)), ccalloc);
                     switch (neighbor.operation)
                     {
                         case OP::PUSH:
-                            {
-                                stack.push_back(block->size);
-                                auto br = builder.CreateCondBr(cond, left, right);
-                            }
+                            builder.CreateCall(pushstack, {builder.getInt64(block->size), stackalloc, stacksize, stackreserved});
+                            builder.CreateCall(printf, {printresult, builder.CreateLoad(stacksize), builder.CreateLoad(stackreserved), builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize})});
                             break;
                         case OP::POP:
-                            if (stack.size() >= 1)
-                            {
-                                stack.pop_back();
-                            }
+                            builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize});
                             break;
-                        case OP::ADD:
+                        /*case OP::ADD:
                             if (stack.size() >= 2)
                             {
                                 const auto first = stack.back();
@@ -559,7 +626,7 @@ int main(const int argc, const char **argv)
                                     stack.push_back(amount);
                                 } else if (depth > 0)
                                 {
-                                    // A roll equal to the depth restores the exact same order
+                                    A roll equal to the depth restores the exact same order
                                     amount %= depth;
 
                                     auto rollend = stack.rbegin();
@@ -605,9 +672,11 @@ int main(const int argc, const char **argv)
                                 return 0;
                             }
                             break;
+                            */
                         default:
                             break;
                     }
+                    builder.CreateBr(nextbb);
                 }
             }
         }
