@@ -405,8 +405,6 @@ int main(const int argc, const char **argv)
         builder.CreateStore(realcall, stackalloc, false);
         builder.CreateStore(llvm::ConstantInt::get(sizet_type, 0), stacksize, false);
         builder.CreateStore(llvm::ConstantInt::get(sizet_type, args::get(startstacksize)), stackreserved, false);
-        auto printdigit = builder.CreateGlobalStringPtr("stack size: %llu, reserved: %llu\n");
-        auto printresult = builder.CreateGlobalStringPtr("stack size: %llu, reserved: %llu, retvalue: %llu\n");
         auto blank = llvm::BasicBlock::Create(context, "blank", mainFunc);
         llvm::ReturnInst::Create(context, llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0), blank);
 
