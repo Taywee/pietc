@@ -32,6 +32,8 @@
 
 #include "color.hxx"
 
+const static bool CHARISSIGNED = (static_cast<char>(0) - 1 > 0);
+
 static Field ImageToField(const std::string filename, size_t codelsize, Color unknown);
 static void PrintField(const Field &field, const Map &map);
 
@@ -42,7 +44,7 @@ int main(const int argc, const char **argv)
             "executable, as well as run the optimized JIT compiled Piet program immediately.");
     args::HelpFlag help(parser, "help", "Display this help menu", {'h', "help"});
     args::ValueFlag<size_t> cs(parser, "size", "Set the codel size manually (0 tries to auto-detect, which usually works, but may be imperfect in certain scenarios)", {"cs", "codel-size"}, 0);
-    //args::Flag trace(parser, "trace", "Trace program run", {'t', "trace"});
+    args::Flag trace(parser, "trace", "Trace program run", {'t', "trace"});
     args::Flag unknownWhite(parser, "unknown-white", "Make unknown colors white", {"unknown-white"});
     args::Flag unknownBlack(parser, "unknown-black", "Make unknown colors black", {"unknown-black"});
     args::ValueFlag<size_t> startstacksize(parser, "size", "Specify the starting stack size", {'s', "stack"}, 1);
@@ -214,9 +216,13 @@ int main(const int argc, const char **argv)
         llvm::FunctionType *printftype = llvm::FunctionType::get(llvm::Type::getInt32Ty(context), {llvm::Type::getInt8PtrTy(context)}, true);
         llvm::Function *printf = llvm::Function::Create(printftype, llvm::Function::ExternalLinkage, "printf", &module);
 
+        //puts
+        llvm::FunctionType *putstype = llvm::FunctionType::get(llvm::Type::getInt32Ty(context), {llvm::Type::getInt8PtrTy(context)});
+        llvm::Function *puts = llvm::Function::Create(putstype, llvm::Function::ExternalLinkage, "puts", &module);
+
         //scanf
         llvm::FunctionType *scanftype = llvm::FunctionType::get(llvm::Type::getInt32Ty(context), {llvm::Type::getInt8PtrTy(context)}, true);
-        llvm::Function *scanf = llvm::Function::Create(scanftype, llvm::Function::ExternalLinkage, "printf", &module);
+        llvm::Function *scanf = llvm::Function::Create(scanftype, llvm::Function::ExternalLinkage, "scanf", &module);
 
         //getchar
         llvm::FunctionType *getchartype = llvm::FunctionType::get(llvm::Type::getInt32Ty(context), false);
@@ -318,6 +324,7 @@ int main(const int argc, const char **argv)
         llvm::AllocaInst *stackalloc = builder.CreateAlloca(llvm::Type::getInt64PtrTy(context), 0, "stack");
         llvm::AllocaInst *stacksize = builder.CreateAlloca(sizet_type, 0, "stacksize");
         llvm::AllocaInst *stackreserved = builder.CreateAlloca(sizet_type, 0, "stackreserved");
+        llvm::AllocaInst *dummyn = builder.CreateAlloca(builder.getInt64Ty(), 0, "dummyn");
         llvm::Value *realcall = builder.CreateCall(realloc, {llvm::ConstantPointerNull::get(llvm::Type::getInt64PtrTy(context)), llvm::ConstantInt::get(sizet_type, args::get(startstacksize) * sizeof(size_t))});
         builder.CreateStore(realcall, stackalloc, false);
         builder.CreateStore(llvm::ConstantInt::get(sizet_type, 0), stacksize, false);
@@ -384,25 +391,25 @@ int main(const int argc, const char **argv)
                 auto block = colorBlock.first;
                 auto bb = colorBlock.second;
                 builder.SetInsertPoint(bb);
-                /*if (trace)
+                if (trace)
                 {
-                    std::cout << "##########" << std::endl;
-                    std::cout << "Codel   : " << block->codel << std::endl;
-                    std::cout << "Exits   : " << std::endl;
+                    std::ostringstream ss;
+                    ss << "##########\n"
+                        << "Codel   : " << block->codel << '\n'
+                        << "Size    : " << block->size << '\n'
+                        << "Exits   : \n";
                     for (auto dc: std::list<DC>{DC::North, DC::East, DC::South, DC::West})
                     {
                         for (auto cc: std::list<CC>{CC::Left, CC::Right})
                         {
                             if (!block->neighbors[static_cast<size_t>(dc)][static_cast<size_t>(cc)].block.expired())
                             {
-                                std::cout << "    " << dc << cc << "  : " << block->exits[static_cast<size_t>(dc)][static_cast<size_t>(cc)] << std::endl;
+                                ss << "    " << dc << cc << "  : " << block->exits[static_cast<size_t>(dc)][static_cast<size_t>(cc)] << '\n';
                             }
                         }
                     }
-                    std::cout << "Stack   : ";
-                    std::copy(std::begin(stack), std::end(stack), std::ostream_iterator<long long int>(std::cout, " "));
-                    std::cout << std::endl;
-                }*/
+                    builder.CreateCall(puts, {builder.CreateGlobalStringPtr(ss.str())});
+                }
                 // If this block has no neighbors, kill it.
                 if (std::all_of(std::begin(block->neighbors), std::end(block->neighbors),
                             [](const std::array<ColorBlock::Neighbor, 2> &arr)
@@ -417,13 +424,13 @@ int main(const int argc, const char **argv)
                     builder.CreateRet(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0));
                     continue;
                 }
-                auto getNeighbor = [](std::array<std::array<ColorBlock::Neighbor, 2>, 4> &neighbors, DC dc, CC cc) -> ColorBlock::Neighbor&
+                auto getNeighbor = [](std::array<std::array<ColorBlock::Neighbor, 2>, 4> &neighbors, DC dc, CC cc)
                 {
                     bool toggleCC = true;
-                    auto &neighbor = neighbors[static_cast<size_t>(dc)][static_cast<size_t>(cc)];
-                    for (neighbor = neighbors[static_cast<size_t>(dc)][static_cast<size_t>(cc)];
-                            neighbor.block.expired();
-                            neighbor = neighbors[static_cast<size_t>(dc)][static_cast<size_t>(cc)])
+                    ColorBlock::Neighbor *neighbor = nullptr;
+                    for (neighbor = &neighbors[static_cast<size_t>(dc)][static_cast<size_t>(cc)];
+                            neighbor->block.expired();
+                            neighbor = &neighbors[static_cast<size_t>(dc)][static_cast<size_t>(cc)])
                     {
                         if (toggleCC)
                             cc = Toggle(cc);
@@ -434,21 +441,20 @@ int main(const int argc, const char **argv)
                     return neighbor;
                 };
 
-                std::map<ColorBlock::Neighbor *, std::list<std::tuple<DC, CC>>> neighbors;
+                std::unordered_set<ColorBlock::Neighbor *> neighbors;
                 std::map<std::tuple<DC, CC>, ColorBlock::Neighbor *> rneighbors;
                 for (auto dc: std::list<DC>{DC::North, DC::East, DC::South, DC::West})
                 {
                     for (auto cc: std::list<CC>{CC::Left, CC::Right})
                     {
-                        auto &neighbor = getNeighbor(block->neighbors, dc, cc);
-                        neighbors[&neighbor].emplace_back(dc, cc);
-                        rneighbors.emplace(std::tuple<DC, CC>{dc, cc}, &neighbor);
+                        auto neighbor = getNeighbor(block->neighbors, dc, cc);
+                        neighbors.emplace(neighbor);
+                        rneighbors.emplace(std::tuple<DC, CC>{dc, cc}, neighbor);
                     }
                 }
-                std::map<ColorBlock::Neighbor *, llvm::BasicBlock*> neighborbbs;
-                for(auto &n: neighbors)
+                std::unordered_map<ColorBlock::Neighbor *, llvm::BasicBlock*> neighborbbs;
+                for(auto neighbor: neighbors)
                 {
-                    auto neighbor = n.first;
                     std::ostringstream name;
                     name << "neighbor_" << neighbor->dc << neighbor->cc;
                     neighborbbs.emplace(neighbor, llvm::BasicBlock::Create(context, name.str(), mainFunc));
@@ -475,143 +481,178 @@ int main(const int argc, const char **argv)
                 rsw->addCase(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::South)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::South, CC::Right})->second)->second);
                 rsw->addCase(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::West)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::West, CC::Right})->second)->second);
                 
-                for(auto &n: neighbors)
+                for(auto neighbor: neighbors)
                 {
-                    auto &neighbor = *n.first;
-                    auto newdc = neighbor.dc;
-                    auto newcc = neighbor.cc;
-                    auto bb = neighborbbs.find(&neighbor)->second;
-                    auto nextbb = blocks.find(neighbor.block.lock())->second;
+                    auto newdc = neighbor->dc;
+                    auto newcc = neighbor->cc;
+                    auto bb = neighborbbs.find(neighbor)->second;
+                    auto nextbb = blocks.find(neighbor->block.lock())->second;
                     builder.SetInsertPoint(bb);
                     builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(newdc)), dcalloc);
                     builder.CreateStore(llvm::ConstantInt::get(i1, static_cast<uint8_t>(newcc)), ccalloc);
-                    switch (neighbor.operation)
+
+                    if (trace)
+                    {
+                        std::ostringstream ss;
+                        ss << "Running operation " << neighbor->operation << " size " << block->size;
+                        builder.CreateCall(puts, {builder.CreateGlobalStringPtr(ss.str())});
+                    }
+
+                    switch (neighbor->operation)
                     {
                         case OP::PUSH:
                             builder.CreateCall(pushstack, {builder.getInt64(block->size), stackalloc, stacksize, stackreserved});
-                            builder.CreateCall(printf, {printresult, builder.CreateLoad(stacksize), builder.CreateLoad(stackreserved), builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize})});
                             break;
+
                         case OP::POP:
                             builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize});
                             break;
-                        /*case OP::ADD:
-                            if (stack.size() >= 2)
+
+                        case OP::ADD:
                             {
-                                const auto first = stack.back();
-                                stack.pop_back();
-                                const auto second = stack.back();
-                                stack.pop_back();
-                                stack.push_back(first + second);
+                                auto iftrue = llvm::BasicBlock::Create(context, "iftrue", mainFunc);
+                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), builder.getInt64(2));
+                                builder.CreateCondBr(cond, iftrue, nextbb);
+                                {
+                                    builder.SetInsertPoint(iftrue);
+                                    auto first = builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize});
+                                    auto second = builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize});
+                                    builder.CreateCall(pushstack, {builder.CreateAdd(second, first), stackalloc, stacksize, stackreserved});
+                                }
                             }
                             break;
                         case OP::SUBTRACT:
-                            if (stack.size() >= 2)
                             {
-                                const auto first = stack.back();
-                                stack.pop_back();
-                                const auto second = stack.back();
-                                stack.pop_back();
-                                stack.push_back(second - first);
+                                auto iftrue = llvm::BasicBlock::Create(context, "iftrue", mainFunc);
+                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), builder.getInt64(2));
+                                builder.CreateCondBr(cond, iftrue, nextbb);
+                                {
+                                    builder.SetInsertPoint(iftrue);
+                                    auto first = builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize});
+                                    auto second = builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize});
+                                    builder.CreateCall(pushstack, {builder.CreateSub(second, first), stackalloc, stacksize, stackreserved});
+                                }
                             }
                             break;
                         case OP::MULTIPLY:
-                            if (stack.size() >= 2)
                             {
-                                const auto first = stack.back();
-                                stack.pop_back();
-                                const auto second = stack.back();
-                                stack.pop_back();
-                                stack.push_back(first * second);
+                                auto iftrue = llvm::BasicBlock::Create(context, "iftrue", mainFunc);
+                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), builder.getInt64(2));
+                                builder.CreateCondBr(cond, iftrue, nextbb);
+                                {
+                                    builder.SetInsertPoint(iftrue);
+                                    auto first = builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize});
+                                    auto second = builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize});
+                                    builder.CreateCall(pushstack, {builder.CreateMul(second, first), stackalloc, stacksize, stackreserved});
+                                }
                             }
                             break;
                         case OP::DIVIDE:
-                            if (stack.size() >= 2)
                             {
-                                const auto first = stack.back();
-                                stack.pop_back();
-                                const auto second = stack.back();
-                                stack.pop_back();
-                                stack.push_back(second / first);
+                                auto iftrue = llvm::BasicBlock::Create(context, "iftrue", mainFunc);
+                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), builder.getInt64(2));
+                                builder.CreateCondBr(cond, iftrue, nextbb);
+                                {
+                                    builder.SetInsertPoint(iftrue);
+                                    auto first = builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize});
+                                    auto second = builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize});
+                                    builder.CreateCall(pushstack, {builder.CreateSDiv(second, first), stackalloc, stacksize, stackreserved});
+                                }
                             }
                             break;
                         case OP::MOD:
-                            if (stack.size() >= 2)
                             {
-                                auto first = stack.back();
-                                stack.pop_back();
-                                auto second = stack.back();
-                                stack.pop_back();
-                                if (first == 0)
+                                auto iftrue = llvm::BasicBlock::Create(context, "iftrue", mainFunc);
+                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), builder.getInt64(2));
+                                builder.CreateCondBr(cond, iftrue, nextbb);
                                 {
-                                    stack.push_back(second);
-                                    stack.push_back(first);
-                                    break;
+                                    builder.SetInsertPoint(iftrue);
+                                    auto first = builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize});
+                                    auto second = builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize});
+                                    auto rem = builder.CreateSRem(second, first);
+                                    auto neg = llvm::BasicBlock::Create(context, "negative", mainFunc);
+                                    auto nonneg = llvm::BasicBlock::Create(context, "nonnegative", mainFunc);
+                                    auto cond = builder.CreateICmpSLT(rem, builder.getInt64(0));
+                                    builder.CreateCondBr(cond, neg, nonneg);
+                                    {
+                                        builder.SetInsertPoint(neg);
+                                        builder.CreateCall(pushstack, {builder.CreateAdd(rem, first), stackalloc, stacksize, stackreserved});
+                                        builder.CreateBr(nextbb);
+                                    }
+                                    {
+                                        builder.SetInsertPoint(nonneg);
+                                        builder.CreateCall(pushstack, {rem, stackalloc, stacksize, stackreserved});
+                                    }
                                 }
-
-                                const bool positive = second >= 0;
-                                auto result = second % first;
-
-                                if (result < 0 && positive)
-                                {
-                                    result *= -1;
-                                }
-                                stack.push_back(result);
                             }
                             break;
                         case OP::NOT:
-                            if (stack.size() >= 1)
                             {
-                                const auto first = stack.back();
-                                stack.pop_back();
-                                stack.push_back(!first);
+                                auto iftrue = llvm::BasicBlock::Create(context, "iftrue", mainFunc);
+                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), builder.getInt64(1));
+                                builder.CreateCondBr(cond, iftrue, nextbb);
+                                {
+                                    builder.SetInsertPoint(iftrue);
+                                    auto value = builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize});
+                                    auto cond = builder.CreateICmpEQ(value, builder.getInt64(0));
+                                    builder.CreateCall(pushstack, {builder.CreateIntCast(cond, builder.getInt64Ty(), false), stackalloc, stacksize, stackreserved});
+                                }
                             }
                             break;
                         case OP::GREATER:
-                            if (stack.size() >= 2)
                             {
-                                const auto first = stack.back();
-                                stack.pop_back();
-                                const auto second = stack.back();
-                                stack.pop_back();
-                                stack.push_back(second > first);
+                                auto iftrue = llvm::BasicBlock::Create(context, "iftrue", mainFunc);
+                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), builder.getInt64(2));
+                                builder.CreateCondBr(cond, iftrue, nextbb);
+                                {
+                                    builder.SetInsertPoint(iftrue);
+                                    auto first = builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize});
+                                    auto second = builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize});
+                                    auto cond = builder.CreateICmpSGT(second, first);
+                                    builder.CreateCall(pushstack, {builder.CreateIntCast(cond, builder.getInt64Ty(), false), stackalloc, stacksize, stackreserved});
+                                }
                             }
                             break;
                         case OP::POINTER:
-                            if (stack.size() >= 1)
                             {
-                                auto first = stack.back();
-                                stack.pop_back();
-                                if (first > 0)
+                                auto iftrue = llvm::BasicBlock::Create(context, "iftrue", mainFunc);
+                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), builder.getInt64(1));
+                                builder.CreateCondBr(cond, iftrue, nextbb);
                                 {
-                                    dc = static_cast<DC>((static_cast<size_t>(dc) + first) % 4);
-                                } else if (first < 0)
-                                {
-                                    first *= -1;
-                                    dc = static_cast<DC>((static_cast<size_t>(dc) + 4 - (first % 4)) % 4);
+                                    builder.SetInsertPoint(iftrue);
+                                    auto value = builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize});
+                                    auto rotation = builder.CreateIntCast(builder.CreateSRem(value, builder.getInt64(4)), builder.getInt8Ty(), false);
+                                    builder.CreateStore(builder.CreateSRem(builder.CreateAdd(builder.CreateLoad(dcalloc), rotation), builder.getInt8(4)), dcalloc);
                                 }
                             }
                             break;
                         case OP::SWITCH:
-                            if (stack.size() >= 1)
                             {
-                                auto first = stack.back();
-                                stack.pop_back();
-                                if (first < 0)
+                                auto iftrue = llvm::BasicBlock::Create(context, "iftrue", mainFunc);
+                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), builder.getInt64(1));
+                                builder.CreateCondBr(cond, iftrue, nextbb);
                                 {
-                                    first *= -1;
-                                }
-                                if (first % 2 == 1)
-                                {
-                                    cc = Toggle(cc);
+                                    builder.SetInsertPoint(iftrue);
+                                    auto value = builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize});
+                                    auto odd = builder.CreateIntCast(builder.CreateSRem(value, builder.getInt64(2)), builder.getInt1Ty(), false);
+                                    builder.CreateStore(builder.CreateXor(builder.CreateLoad(ccalloc), odd), ccalloc);
                                 }
                             }
                             break;
                         case OP::DUPLICATE:
-                            if (stack.size() >= 1)
                             {
-                                stack.push_back(stack.back());
+                                auto iftrue = llvm::BasicBlock::Create(context, "iftrue", mainFunc);
+                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), builder.getInt64(1));
+                                builder.CreateCondBr(cond, iftrue, nextbb);
+                                {
+                                    builder.SetInsertPoint(iftrue);
+                                    auto value = builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize});
+                                    builder.CreateCall(pushstack, {value, stackalloc, stacksize, stackreserved});
+                                    builder.CreateCall(pushstack, {value, stackalloc, stacksize, stackreserved});
+                                }
                             }
                             break;
+                            /*
                         case OP::ROLL:
                             if (stack.size() >= 2)
                             {
@@ -639,40 +680,47 @@ int main(const int argc, const char **argv)
                                 }
                             }
                             break;
+                            */
                         case OP::INN:
                             {
-                                std::cout << args::get(prompt);
-                                long long int input;
-                                std::cin >> input;
-                                stack.push_back(input);
+                                llvm::Value *getn = builder.CreateGlobalStringPtr("%Ld");
+                                builder.CreateCall(scanf, {getn, dummyn});
+                                builder.CreateCall(pushstack, {builder.CreateLoad(dummyn), stackalloc, stacksize, stackreserved});
                             }
                             break;
                         case OP::INC:
                             {
-                                std::cout << args::get(prompt);
-                                stack.push_back(std::cin.get());
+                                builder.CreateCall(pushstack, { builder.CreateIntCast(builder.CreateCall(getchar), builder.getInt64Ty(), CHARISSIGNED), stackalloc, stacksize, stackreserved});
                             }
                             break;
                         case OP::OUTN:
-                            if (stack.size() >= 1)
                             {
-                                std::cout << stack.back() << std::flush;
-                                stack.pop_back();
+                                auto iftrue = llvm::BasicBlock::Create(context, "iftrue", mainFunc);
+                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), builder.getInt64(1));
+                                builder.CreateCondBr(cond, iftrue, nextbb);
+                                {
+                                    builder.SetInsertPoint(iftrue);
+                                    auto value = builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize});
+                                    llvm::Value *putn = builder.CreateGlobalStringPtr("%Ld");
+                                    builder.CreateCall(printf, {putn, value});
+                                }
                             }
                             break;
                         case OP::OUTC:
-                            if (stack.size() >= 1)
                             {
-                                std::cout << static_cast<char>(stack.back()) << std::flush;
-                                stack.pop_back();
+                                auto iftrue = llvm::BasicBlock::Create(context, "iftrue", mainFunc);
+                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), builder.getInt64(1));
+                                builder.CreateCondBr(cond, iftrue, nextbb);
+                                {
+                                    builder.SetInsertPoint(iftrue);
+                                    auto value = builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize});
+                                    builder.CreateCall(putchar, {builder.CreateIntCast(value, builder.getInt32Ty(), CHARISSIGNED)});
+                                }
                             }
                             break;
                         case OP::EXIT:
-                            {
-                                return 0;
-                            }
+                            builder.CreateRet(builder.getInt64(0));
                             break;
-                            */
                         default:
                             break;
                     }
