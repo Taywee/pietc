@@ -18,6 +18,18 @@
 #include <args.hxx>
 #include <Magick++.h>
 
+#include <llvm/ADT/APSInt.h>
+#include <llvm/ADT/STLExtras.h>
+#include <llvm/IR/BasicBlock.h>
+#include <llvm/IR/Constants.h>
+#include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Function.h>
+#include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Module.h>
+#include <llvm/IR/Type.h>
+#include <llvm/IR/Verifier.h>
+
 #include "color.hxx"
 
 static Field ImageToField(const std::string filename, size_t codelsize, Color unknown);
@@ -33,6 +45,7 @@ int main(const int argc, const char **argv)
     args::Flag trace(parser, "trace", "Trace program run", {'t', "trace"});
     args::Flag unknownWhite(parser, "unknown-white", "Make unknown colors white", {"unknown-white"});
     args::Flag unknownBlack(parser, "unknown-black", "Make unknown colors black", {"unknown-black"});
+    args::ValueFlag<size_t> startstacksize(parser, "size", "Specify the starting stack size", {'s', "stack"}, 64);
     args::ValueFlag<std::string> prompt(parser, "prompt", "Prompt for input operations", {'p', "prompt"}, "? ");
     args::Group required(parser, "", args::Group::Validators::All);
     args::Positional<std::string> input(required, "input", "Input file to use");
@@ -139,11 +152,6 @@ int main(const int argc, const char **argv)
             }
         }
 
-        // TODO:
-        // * trace each color block out each of its 8 directions to another color block or dead end (This should probably be done inside of ColorBlock for easier encapsulation)
-        // * do determinations on which color blocks and white directions are program exits
-        // * Once this is done, the graphical image is no longer necessary and may be thrown away
-        // * generate a sort of AST (but more of an Abstract Syntax Map, as the program is 2D) for use with code generation
         std::unordered_set<std::shared_ptr<ColorBlock>> colorBlocks;
         std::transform(std::begin(map), std::end(map), std::inserter(colorBlocks, std::end(colorBlocks)), [](const MapItem &item) {return item.second;});
 
@@ -166,6 +174,51 @@ int main(const int argc, const char **argv)
             }
         }
 
+        llvm::LLVMContext context;
+        llvm::IRBuilder<> builder(context);
+        llvm::Module module(args::get(input), context);
+
+        //printf
+        llvm::FunctionType *printftype = llvm::FunctionType::get(llvm::Type::getInt32Ty(context), {llvm::Type::getInt8PtrTy(context)}, true);
+        llvm::Function *printf = llvm::Function::Create(printftype, llvm::Function::ExternalLinkage, "printf", &module);
+
+        //scanf
+        llvm::FunctionType *scanftype = llvm::FunctionType::get(llvm::Type::getInt32Ty(context), {llvm::Type::getInt8PtrTy(context)}, true);
+        llvm::Function *scanf = llvm::Function::Create(scanftype, llvm::Function::ExternalLinkage, "printf", &module);
+
+        //getchar
+        llvm::FunctionType *getchartype = llvm::FunctionType::get(llvm::Type::getInt32Ty(context), false);
+        llvm::Function *getchar = llvm::Function::Create(getchartype, llvm::Function::ExternalLinkage, "getchar", &module);
+
+        //putchar
+        llvm::FunctionType *putchartype = llvm::FunctionType::get(llvm::Type::getInt32Ty(context), {llvm::Type::getInt32Ty(context)}, false);
+        llvm::Function *putchar = llvm::Function::Create(putchartype, llvm::Function::ExternalLinkage, "putchar", &module);
+
+        //realloc
+        llvm::FunctionType *realloctype = llvm::FunctionType::get(llvm::Type::getInt64PtrTy(context), {llvm::Type::getInt64PtrTy(context), llvm::Type::getInt64Ty(context)}, false);
+        llvm::Function *realloc = llvm::Function::Create(realloctype, llvm::Function::ExternalLinkage, "realloc", &module);
+
+        llvm::FunctionType *mainType = llvm::FunctionType::get(llvm::Type::getInt32Ty(context), false);
+        llvm::Constant* mainC = module.getOrInsertFunction("main", mainType);
+        llvm::Function* mainFunc = llvm::dyn_cast<llvm::Function>(mainC);
+
+        llvm::BasicBlock *bb = llvm::BasicBlock::Create(context, "", mainFunc);
+        builder.SetInsertPoint(bb);
+
+        llvm::AllocaInst *dcalloc = builder.CreateAlloca(llvm::Type::getInt8Ty(context), 0, "dc");
+        llvm::AllocaInst *ccalloc = builder.CreateAlloca(llvm::Type::getInt1Ty(context), 0, "cc");
+        llvm::AllocaInst *stackalloc = builder.CreateAlloca(llvm::Type::getInt64PtrTy(context), 0, "stack");
+        llvm::AllocaInst *stacksize = builder.CreateAlloca(llvm::Type::getInt64Ty(context), 0, "stacksize");
+        llvm::AllocaInst *stackreserved = builder.CreateAlloca(llvm::Type::getInt64Ty(context), 0, "stackreserved");
+        llvm::Value *realcall = builder.CreateCall(realloc, {llvm::ConstantPointerNull::get(llvm::Type::getInt64PtrTy(context)), llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), args::get(startstacksize))});
+        builder.CreateStore(realcall, stackalloc, false);
+        builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), 0), stacksize, false);
+        builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), args::get(startstacksize)), stackreserved, false);
+
+        llvm::Value *printdigit = builder.CreateGlobalStringPtr("%d\n");
+        builder.CreateCall(printf, {printdigit, llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), args::get(startstacksize))});
+
+
         CC cc = CC::Left;
         DC dc = DC::East;
         std::shared_ptr<ColorBlock> block = map.find(Coords{0, 0})->second;
@@ -177,273 +230,276 @@ int main(const int argc, const char **argv)
                 std::tie(block, dc, cc, exit) = TraceWhite(Coords{0, 0}, field, map, dc, cc);
                 break;
             case Color::Black:
-                return 1;
+                exit = true;
                 break;
             default:
                 break;
         }
-        if (exit)
+        if (!exit)
         {
-            return 0;
-        }
-
-        std::list<long long int> stack;
-        while (1)
-        {
-            if (trace)
-            {
-                std::cout << "##########" << std::endl;
-                std::cout << "Codel   : " << block->codel << std::endl;
-                std::cout << "Exits   : " << std::endl;
-                for (auto dc: std::list<DC>{DC::North, DC::East, DC::South, DC::West})
-                {
-                    for (auto cc: std::list<CC>{CC::Left, CC::Right})
-                    {
-                        if (!block->neighbors[static_cast<size_t>(dc)][static_cast<size_t>(cc)].block.expired())
-                        {
-                            std::cout << "    " << dc << cc << "  : " << block->exits[static_cast<size_t>(dc)][static_cast<size_t>(cc)] << std::endl;
-                        }
-                    }
-                }
-                std::cout << "Stack   : ";
-                std::copy(std::begin(stack), std::end(stack), std::ostream_iterator<long long int>(std::cout, " "));
-                std::cout << std::endl;
-            }
-            // If this block has no neighbors, kill it.
-            if (std::all_of(std::begin(block->neighbors), std::end(block->neighbors),
-                [](const std::array<ColorBlock::Neighbor, 2> &arr)
-                {
-                    return std::all_of(std::begin(arr), std::end(arr),
-                        [](const ColorBlock::Neighbor &n)
-                        {
-                            return n.block.expired();
-                        });
-                }))
-            {
-                return 0;
-            }
-            bool toggleCC = true;
+            std::list<long long int> stack;
             while (1)
             {
                 if (trace)
                 {
-                    std::cout << "DC+CC   : " << dc << cc << std::endl;
+                    std::cout << "##########" << std::endl;
+                    std::cout << "Codel   : " << block->codel << std::endl;
+                    std::cout << "Exits   : " << std::endl;
+                    for (auto dc: std::list<DC>{DC::North, DC::East, DC::South, DC::West})
+                    {
+                        for (auto cc: std::list<CC>{CC::Left, CC::Right})
+                        {
+                            if (!block->neighbors[static_cast<size_t>(dc)][static_cast<size_t>(cc)].block.expired())
+                            {
+                                std::cout << "    " << dc << cc << "  : " << block->exits[static_cast<size_t>(dc)][static_cast<size_t>(cc)] << std::endl;
+                            }
+                        }
+                    }
+                    std::cout << "Stack   : ";
+                    std::copy(std::begin(stack), std::end(stack), std::ostream_iterator<long long int>(std::cout, " "));
+                    std::cout << std::endl;
                 }
-                auto neighbor = block->neighbors[static_cast<size_t>(dc)][static_cast<size_t>(cc)];
-                if (neighbor.block.expired())
+                // If this block has no neighbors, kill it.
+                if (std::all_of(std::begin(block->neighbors), std::end(block->neighbors),
+                            [](const std::array<ColorBlock::Neighbor, 2> &arr)
+                            {
+                            return std::all_of(std::begin(arr), std::end(arr),
+                                    [](const ColorBlock::Neighbor &n)
+                                    {
+                                    return n.block.expired();
+                                    });
+                            }))
                 {
-                    if (toggleCC)
-                        cc = Toggle(cc);
-                    else
-                        dc = Toggle(dc);
-                    toggleCC = !toggleCC;
-                } else
+                    return 0;
+                }
+                bool toggleCC = true;
+                while (1)
                 {
                     if (trace)
                     {
-                        std::cout << neighbor.operation << " size " << block->size << std::endl;
+                        std::cout << "DC+CC   : " << dc << cc << std::endl;
                     }
-                    dc = neighbor.dc;
-                    cc = neighbor.cc;
-                    switch (neighbor.operation)
+                    auto neighbor = block->neighbors[static_cast<size_t>(dc)][static_cast<size_t>(cc)];
+                    if (neighbor.block.expired())
                     {
-                        case OP::PUSH:
-                            {
-                                stack.push_back(block->size);
-                            }
-                            break;
-                        case OP::POP:
-                            if (stack.size() >= 1)
-                            {
-                                stack.pop_back();
-                            }
-                            break;
-                        case OP::ADD:
-                            if (stack.size() >= 2)
-                            {
-                                const auto first = stack.back();
-                                stack.pop_back();
-                                const auto second = stack.back();
-                                stack.pop_back();
-                                stack.push_back(first + second);
-                            }
-                            break;
-                        case OP::SUBTRACT:
-                            if (stack.size() >= 2)
-                            {
-                                const auto first = stack.back();
-                                stack.pop_back();
-                                const auto second = stack.back();
-                                stack.pop_back();
-                                stack.push_back(second - first);
-                            }
-                            break;
-                        case OP::MULTIPLY:
-                            if (stack.size() >= 2)
-                            {
-                                const auto first = stack.back();
-                                stack.pop_back();
-                                const auto second = stack.back();
-                                stack.pop_back();
-                                stack.push_back(first * second);
-                            }
-                            break;
-                        case OP::DIVIDE:
-                            if (stack.size() >= 2)
-                            {
-                                const auto first = stack.back();
-                                stack.pop_back();
-                                const auto second = stack.back();
-                                stack.pop_back();
-                                stack.push_back(second / first);
-                            }
-                            break;
-                        case OP::MOD:
-                            if (stack.size() >= 2)
-                            {
-                                auto first = stack.back();
-                                stack.pop_back();
-                                auto second = stack.back();
-                                stack.pop_back();
-                                if (first == 0)
+                        if (toggleCC)
+                            cc = Toggle(cc);
+                        else
+                            dc = Toggle(dc);
+                        toggleCC = !toggleCC;
+                    } else
+                    {
+                        if (trace)
+                        {
+                            std::cout << neighbor.operation << " size " << block->size << std::endl;
+                        }
+                        dc = neighbor.dc;
+                        cc = neighbor.cc;
+                        switch (neighbor.operation)
+                        {
+                            case OP::PUSH:
                                 {
-                                    stack.push_back(second);
-                                    stack.push_back(first);
-                                    break;
+                                    stack.push_back(block->size);
                                 }
-
-                                const bool positive = second >= 0;
-                                auto result = second % first;
-
-                                if (result < 0 && positive)
+                                break;
+                            case OP::POP:
+                                if (stack.size() >= 1)
                                 {
-                                    result *= -1;
+                                    stack.pop_back();
                                 }
-                                stack.push_back(result);
-                            }
-                            break;
-                        case OP::NOT:
-                            if (stack.size() >= 1)
-                            {
-                                const auto first = stack.back();
-                                stack.pop_back();
-                                stack.push_back(!first);
-                            }
-                            break;
-                        case OP::GREATER:
-                            if (stack.size() >= 2)
-                            {
-                                const auto first = stack.back();
-                                stack.pop_back();
-                                const auto second = stack.back();
-                                stack.pop_back();
-                                stack.push_back(second > first);
-                            }
-                            break;
-                        case OP::POINTER:
-                            if (stack.size() >= 1)
-                            {
-                                auto first = stack.back();
-                                stack.pop_back();
-                                if (first > 0)
+                                break;
+                            case OP::ADD:
+                                if (stack.size() >= 2)
                                 {
-                                    dc = static_cast<DC>((static_cast<size_t>(dc) + first) % 4);
-                                } else if (first < 0)
-                                {
-                                    first *= -1;
-                                    dc = static_cast<DC>((static_cast<size_t>(dc) + 4 - (first % 4)) % 4);
+                                    const auto first = stack.back();
+                                    stack.pop_back();
+                                    const auto second = stack.back();
+                                    stack.pop_back();
+                                    stack.push_back(first + second);
                                 }
-                            }
-                            break;
-                        case OP::SWITCH:
-                            if (stack.size() >= 1)
-                            {
-                                auto first = stack.back();
-                                stack.pop_back();
-                                if (first < 0)
+                                break;
+                            case OP::SUBTRACT:
+                                if (stack.size() >= 2)
                                 {
-                                    first *= -1;
+                                    const auto first = stack.back();
+                                    stack.pop_back();
+                                    const auto second = stack.back();
+                                    stack.pop_back();
+                                    stack.push_back(second - first);
                                 }
-                                if (first % 2 == 1)
+                                break;
+                            case OP::MULTIPLY:
+                                if (stack.size() >= 2)
                                 {
-                                    cc = Toggle(cc);
+                                    const auto first = stack.back();
+                                    stack.pop_back();
+                                    const auto second = stack.back();
+                                    stack.pop_back();
+                                    stack.push_back(first * second);
                                 }
-                            }
-                            break;
-                        case OP::DUPLICATE:
-                            if (stack.size() >= 1)
-                            {
-                                stack.push_back(stack.back());
-                            }
-                            break;
-                        case OP::ROLL:
-                            if (stack.size() >= 2)
-                            {
-                                auto amount = stack.back();
-                                stack.pop_back();
-                                auto depth = stack.back();
-                                stack.pop_back();
-
-                                if (depth < 0 || static_cast<size_t>(depth) > stack.size())
+                                break;
+                            case OP::DIVIDE:
+                                if (stack.size() >= 2)
                                 {
-                                    stack.push_back(depth);
-                                    stack.push_back(amount);
-                                } else if (depth > 0)
-                                {
-                                    // A roll equal to the depth restores the exact same order
-                                    amount %= depth;
-
-                                    auto rollend = stack.rbegin();
-                                    std::advance(rollend, depth);
-
-                                    auto newtop = stack.rbegin();
-                                    std::advance(newtop, amount);
-
-                                    std::rotate(stack.rbegin(), newtop, rollend);
+                                    const auto first = stack.back();
+                                    stack.pop_back();
+                                    const auto second = stack.back();
+                                    stack.pop_back();
+                                    stack.push_back(second / first);
                                 }
-                            }
-                            break;
-                        case OP::INN:
-                            {
-                                std::cout << args::get(prompt);
-                                long long int input;
-                                std::cin >> input;
-                                stack.push_back(input);
-                            }
-                            break;
-                        case OP::INC:
-                            {
-                                std::cout << args::get(prompt);
-                                stack.push_back(std::cin.get());
-                            }
-                            break;
-                        case OP::OUTN:
-                            if (stack.size() >= 1)
-                            {
-                                std::cout << stack.back() << std::flush;
-                                stack.pop_back();
-                            }
-                            break;
-                        case OP::OUTC:
-                            if (stack.size() >= 1)
-                            {
-                                std::cout << static_cast<char>(stack.back()) << std::flush;
-                                stack.pop_back();
-                            }
-                            break;
-                        case OP::EXIT:
-                            {
-                                return 0;
-                            }
-                            break;
-                        default:
-                            break;
+                                break;
+                            case OP::MOD:
+                                if (stack.size() >= 2)
+                                {
+                                    auto first = stack.back();
+                                    stack.pop_back();
+                                    auto second = stack.back();
+                                    stack.pop_back();
+                                    if (first == 0)
+                                    {
+                                        stack.push_back(second);
+                                        stack.push_back(first);
+                                        break;
+                                    }
+
+                                    const bool positive = second >= 0;
+                                    auto result = second % first;
+
+                                    if (result < 0 && positive)
+                                    {
+                                        result *= -1;
+                                    }
+                                    stack.push_back(result);
+                                }
+                                break;
+                            case OP::NOT:
+                                if (stack.size() >= 1)
+                                {
+                                    const auto first = stack.back();
+                                    stack.pop_back();
+                                    stack.push_back(!first);
+                                }
+                                break;
+                            case OP::GREATER:
+                                if (stack.size() >= 2)
+                                {
+                                    const auto first = stack.back();
+                                    stack.pop_back();
+                                    const auto second = stack.back();
+                                    stack.pop_back();
+                                    stack.push_back(second > first);
+                                }
+                                break;
+                            case OP::POINTER:
+                                if (stack.size() >= 1)
+                                {
+                                    auto first = stack.back();
+                                    stack.pop_back();
+                                    if (first > 0)
+                                    {
+                                        dc = static_cast<DC>((static_cast<size_t>(dc) + first) % 4);
+                                    } else if (first < 0)
+                                    {
+                                        first *= -1;
+                                        dc = static_cast<DC>((static_cast<size_t>(dc) + 4 - (first % 4)) % 4);
+                                    }
+                                }
+                                break;
+                            case OP::SWITCH:
+                                if (stack.size() >= 1)
+                                {
+                                    auto first = stack.back();
+                                    stack.pop_back();
+                                    if (first < 0)
+                                    {
+                                        first *= -1;
+                                    }
+                                    if (first % 2 == 1)
+                                    {
+                                        cc = Toggle(cc);
+                                    }
+                                }
+                                break;
+                            case OP::DUPLICATE:
+                                if (stack.size() >= 1)
+                                {
+                                    stack.push_back(stack.back());
+                                }
+                                break;
+                            case OP::ROLL:
+                                if (stack.size() >= 2)
+                                {
+                                    auto amount = stack.back();
+                                    stack.pop_back();
+                                    auto depth = stack.back();
+                                    stack.pop_back();
+
+                                    if (depth < 0 || static_cast<size_t>(depth) > stack.size())
+                                    {
+                                        stack.push_back(depth);
+                                        stack.push_back(amount);
+                                    } else if (depth > 0)
+                                    {
+                                        // A roll equal to the depth restores the exact same order
+                                        amount %= depth;
+
+                                        auto rollend = stack.rbegin();
+                                        std::advance(rollend, depth);
+
+                                        auto newtop = stack.rbegin();
+                                        std::advance(newtop, amount);
+
+                                        std::rotate(stack.rbegin(), newtop, rollend);
+                                    }
+                                }
+                                break;
+                            case OP::INN:
+                                {
+                                    std::cout << args::get(prompt);
+                                    long long int input;
+                                    std::cin >> input;
+                                    stack.push_back(input);
+                                }
+                                break;
+                            case OP::INC:
+                                {
+                                    std::cout << args::get(prompt);
+                                    stack.push_back(std::cin.get());
+                                }
+                                break;
+                            case OP::OUTN:
+                                if (stack.size() >= 1)
+                                {
+                                    std::cout << stack.back() << std::flush;
+                                    stack.pop_back();
+                                }
+                                break;
+                            case OP::OUTC:
+                                if (stack.size() >= 1)
+                                {
+                                    std::cout << static_cast<char>(stack.back()) << std::flush;
+                                    stack.pop_back();
+                                }
+                                break;
+                            case OP::EXIT:
+                                {
+                                    return 0;
+                                }
+                                break;
+                            default:
+                                break;
+                        }
+                        block = neighbor.block.lock();
+                        break;
                     }
-                    block = neighbor.block.lock();
-                    break;
                 }
             }
         }
+
+        builder.CreateRet(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0));
+
+        module.dump();
+        return 0;
     }
     catch (const Magick::Exception &e)
     {
