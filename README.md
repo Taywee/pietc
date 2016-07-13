@@ -1,8 +1,8 @@
 # pietc
 
-A piet compiler
+A piet interpreter
 
-The functionality of this compiler is dependent on a few basic ideas native to piet:
+The functionality of this interpreter is dependent on a few basic ideas native to piet:
 
 * Each color block may be exited in exactly 8 ways (North, East, South, and
   West, each with a Left and Right chooser)
@@ -25,13 +25,6 @@ The functionality of this compiler is dependent on a few basic ideas native to p
 
 
 So in the end, no colors or shades are important, only the colors and shades of
-blocks relative to one another.  This will likely create redundant entrances
-that are never used between color blocks, but hopefully LLVM can optimize it
-out.  White and black aren't necessary, as black is simply a block and not used
-for logic after tracing, and white is a deterministic conduit between one exit
-and one color block with a NOP, which lets the two be treated as directly
-connected.
+blocks relative to one another.
 
-Each color block, in this way, is a function, or more accurately, a symbol that
-can be GOTO'd, in order to prevent possibility of stack overflow, particularly
-when a program is expected to loop forever.
+Perhaps the LLVM generation will be finished one day.
