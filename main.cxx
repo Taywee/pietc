@@ -226,11 +226,22 @@ int main(const int argc, const char **argv)
         llvm::FunctionType *realloctype = llvm::FunctionType::get(llvm::Type::getInt64PtrTy(context), {llvm::Type::getInt64PtrTy(context), sizet_type}, false);
         llvm::Function *realloc = llvm::Function::Create(realloctype, llvm::Function::ExternalLinkage, "realloc", &module);
 
+        //popstack
+        // value, stack, pointer to current stack size
+        llvm::FunctionType *popstacktype = llvm::FunctionType::get(llvm::Type::getInt64Ty(context), {llvm::PointerType::get(llvm::Type::getInt64PtrTy(context), 0), llvm::Type::getInt64PtrTy(context)}, false);
+        llvm::Function *popstack = llvm::Function::Create(popstacktype, llvm::Function::InternalLinkage, "popstack", &module);
+        std::vector<llvm::Value *> popstackargs(std::begin(popstack->args()), std::end(popstack->args()));
+
+        //pushstack
+        // value, stack, pointer to current stack size
+        llvm::FunctionType *pushstacktype = llvm::FunctionType::get(llvm::Type::getVoidTy(context), {llvm::Type::getInt64Ty(context), llvm::PointerType::get(llvm::Type::getInt64PtrTy(context), 0), llvm::Type::getInt64PtrTy(context)}, false);
+        llvm::Function *pushstack = llvm::Function::Create(pushstacktype, llvm::Function::InternalLinkage, "pushstack", &module);
+
         llvm::FunctionType *mainType = llvm::FunctionType::get(llvm::Type::getInt32Ty(context), false);
         llvm::Constant* mainC = module.getOrInsertFunction("main", mainType);
         llvm::Function* mainFunc = llvm::dyn_cast<llvm::Function>(mainC);
 
-        llvm::BasicBlock *bb = llvm::BasicBlock::Create(context, "", mainFunc);
+        llvm::BasicBlock *bb = llvm::BasicBlock::Create(context, "mainblock", mainFunc);
         builder.SetInsertPoint(bb);
 
         llvm::AllocaInst *dcalloc = builder.CreateAlloca(llvm::Type::getInt8Ty(context), 0, "dc");
@@ -244,6 +255,8 @@ int main(const int argc, const char **argv)
         builder.CreateStore(llvm::ConstantInt::get(sizet_type, args::get(startstacksize)), stackreserved, false);
         //llvm::Value *printdigit = builder.CreateGlobalStringPtr("%lld\n");
         //builder.CreateCall(printf, {printdigit, llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), args::get(startstacksize))});
+        auto blank = llvm::BasicBlock::Create(context, "blank", mainFunc);
+        llvm::ReturnInst::Create(context, llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0), blank);
 
 
 
@@ -285,7 +298,9 @@ int main(const int argc, const char **argv)
                         {
                             if (blocks.find(block) == std::end(blocks))
                             {
-                                blocks.emplace(block, llvm::BasicBlock::Create(context, "", mainFunc));
+                                std::ostringstream name;
+                                name << "colorblock_" << block->codel << "_" << block->exits[static_cast<size_t>(DC::North)][static_cast<size_t>(CC::Left)];
+                                blocks.emplace(block, llvm::BasicBlock::Create(context, name.str(), mainFunc));
                             }
                         }
                         break;
@@ -333,10 +348,10 @@ int main(const int argc, const char **argv)
                     builder.CreateRet(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0));
                     continue;
                 }
-                auto getNeighbor = [](std::array<std::array<ColorBlock::Neighbor, 2>, 4> &neighbors, DC dc, CC cc)
+                auto getNeighbor = [](std::array<std::array<ColorBlock::Neighbor, 2>, 4> &neighbors, DC dc, CC cc) -> ColorBlock::Neighbor&
                 {
                     bool toggleCC = true;
-                    auto neighbor = neighbors[static_cast<size_t>(dc)][static_cast<size_t>(cc)];
+                    auto &neighbor = neighbors[static_cast<size_t>(dc)][static_cast<size_t>(cc)];
                     for (neighbor = neighbors[static_cast<size_t>(dc)][static_cast<size_t>(cc)];
                             neighbor.block.expired();
                             neighbor = neighbors[static_cast<size_t>(dc)][static_cast<size_t>(cc)])
@@ -351,29 +366,59 @@ int main(const int argc, const char **argv)
                 };
 
                 std::map<ColorBlock::Neighbor, std::list<std::tuple<DC, CC>>> neighbors;
+                std::map<std::tuple<DC, CC>, ColorBlock::Neighbor> rneighbors;
                 for (auto dc: std::list<DC>{DC::North, DC::East, DC::South, DC::West})
                 {
                     for (auto cc: std::list<CC>{CC::Left, CC::Right})
                     {
-                        neighbors[getNeighbor(block->neighbors, dc, cc)].emplace_back(dc, cc);
+                        auto &neighbor = getNeighbor(block->neighbors, dc, cc);
+                        neighbors[neighbor].emplace_back(dc, cc);
+                        rneighbors.emplace(std::tuple<DC, CC>{dc, cc}, neighbor);
                     }
                 }
+                std::map<ColorBlock::Neighbor, llvm::BasicBlock*> neighborbbs;
+                for(auto &n: neighbors)
+                {
+                    auto &neighbor = n.first;
+                    std::ostringstream name;
+                    name << "neighbor_" << neighbor.dc << neighbor.cc;
+                    neighborbbs.emplace(neighbor, llvm::BasicBlock::Create(context, name.str(), mainFunc));
+                }
+
+                auto left = llvm::BasicBlock::Create(context, "left", mainFunc);
+                auto right = llvm::BasicBlock::Create(context, "right", mainFunc);
+
+                // Check if cc is left
+                auto cond = builder.CreateICmpEQ(llvm::ConstantInt::get(llvm::Type::getInt1Ty(context), static_cast<uint8_t>(CC::Left)), ccalloc);
+
+                // Link all cc and dc combos to matching neighbors
+                auto br = builder.CreateCondBr(cond, left, right);
+                builder.SetInsertPoint(left);
+                auto lsw = builder.CreateSwitch(dcalloc, blank, 4);
+                lsw->addCase(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::North)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::North, CC::Left})->second)->second);
+                lsw->addCase(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::East)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::East, CC::Left})->second)->second);
+                lsw->addCase(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::South)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::South, CC::Left})->second)->second);
+                lsw->addCase(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::West)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::West, CC::Left})->second)->second);
+                builder.SetInsertPoint(right);
+                auto rsw = builder.CreateSwitch(dcalloc, blank, 4);
+                rsw->addCase(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::North)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::North, CC::Right})->second)->second);
+                rsw->addCase(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::East)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::East, CC::Right})->second)->second);
+                rsw->addCase(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::South)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::South, CC::Right})->second)->second);
+                rsw->addCase(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::West)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::West, CC::Right})->second)->second);
                 
                 for(auto &n: neighbors)
                 {
                     auto &neighbor = n.first;
-                    auto &inputs = n.first;
-                    /*if (trace)
-                      {
-                      std::cout << neighbor.operation << " size " << block->size << std::endl;
-                      }*/
                     auto newdc = neighbor.dc;
                     auto newcc = neighbor.cc;
+                    auto bb = neighborbbs.find(neighbor)->second;
+                    builder.SetInsertPoint(bb);
                     switch (neighbor.operation)
                     {
                         case OP::PUSH:
                             {
                                 stack.push_back(block->size);
+                                auto br = builder.CreateCondBr(cond, left, right);
                             }
                             break;
                         case OP::POP:
@@ -566,8 +611,6 @@ int main(const int argc, const char **argv)
                 }
             }
         }
-        builder.CreateRet(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0));
-
         module.dump();
         return 0;
     }
