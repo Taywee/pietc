@@ -349,7 +349,6 @@ int main(const int argc, const char **argv)
                     }
                     return neighbor;
                 };
-                bool toggleCC = true;
 
                 std::map<ColorBlock::Neighbor, std::list<std::tuple<DC, CC>>> neighbors;
                 for (auto dc: std::list<DC>{DC::North, DC::East, DC::South, DC::West})
