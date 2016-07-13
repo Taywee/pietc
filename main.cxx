@@ -213,33 +213,109 @@ int main(const int argc, const char **argv)
         }
 
         //printf
-        llvm::FunctionType *printftype = llvm::FunctionType::get(llvm::Type::getInt32Ty(context), {llvm::Type::getInt8PtrTy(context)}, true);
-        llvm::Function *printf = llvm::Function::Create(printftype, llvm::Function::ExternalLinkage, "printf", &module);
+        auto printftype = llvm::FunctionType::get(llvm::Type::getInt32Ty(context), {llvm::Type::getInt8PtrTy(context)}, true);
+        auto printf = llvm::Function::Create(printftype, llvm::Function::ExternalLinkage, "printf", &module);
 
         //puts
-        llvm::FunctionType *putstype = llvm::FunctionType::get(llvm::Type::getInt32Ty(context), {llvm::Type::getInt8PtrTy(context)});
-        llvm::Function *puts = llvm::Function::Create(putstype, llvm::Function::ExternalLinkage, "puts", &module);
+        auto putstype = llvm::FunctionType::get(llvm::Type::getInt32Ty(context), {llvm::Type::getInt8PtrTy(context)}, false);
+        auto puts = llvm::Function::Create(putstype, llvm::Function::ExternalLinkage, "puts", &module);
 
         //scanf
-        llvm::FunctionType *scanftype = llvm::FunctionType::get(llvm::Type::getInt32Ty(context), {llvm::Type::getInt8PtrTy(context)}, true);
-        llvm::Function *scanf = llvm::Function::Create(scanftype, llvm::Function::ExternalLinkage, "scanf", &module);
+        auto scanftype = llvm::FunctionType::get(llvm::Type::getInt32Ty(context), {llvm::Type::getInt8PtrTy(context)}, true);
+        auto scanf = llvm::Function::Create(scanftype, llvm::Function::ExternalLinkage, "scanf", &module);
 
         //getchar
-        llvm::FunctionType *getchartype = llvm::FunctionType::get(llvm::Type::getInt32Ty(context), false);
-        llvm::Function *getchar = llvm::Function::Create(getchartype, llvm::Function::ExternalLinkage, "getchar", &module);
+        auto getchartype = llvm::FunctionType::get(llvm::Type::getInt32Ty(context), false);
+        auto getchar = llvm::Function::Create(getchartype, llvm::Function::ExternalLinkage, "getchar", &module);
 
         //putchar
-        llvm::FunctionType *putchartype = llvm::FunctionType::get(llvm::Type::getInt32Ty(context), {llvm::Type::getInt32Ty(context)}, false);
-        llvm::Function *putchar = llvm::Function::Create(putchartype, llvm::Function::ExternalLinkage, "putchar", &module);
+        auto putchartype = llvm::FunctionType::get(llvm::Type::getInt32Ty(context), {llvm::Type::getInt32Ty(context)}, false);
+        auto putchar = llvm::Function::Create(putchartype, llvm::Function::ExternalLinkage, "putchar", &module);
 
         //realloc
-        llvm::FunctionType *realloctype = llvm::FunctionType::get(llvm::Type::getInt64PtrTy(context), {llvm::Type::getInt64PtrTy(context), sizet_type}, false);
-        llvm::Function *realloc = llvm::Function::Create(realloctype, llvm::Function::ExternalLinkage, "realloc", &module);
+        auto realloctype = llvm::FunctionType::get(llvm::Type::getInt64PtrTy(context), {llvm::Type::getInt64PtrTy(context), sizet_type}, false);
+        auto realloc = llvm::Function::Create(realloctype, llvm::Function::ExternalLinkage, "realloc", &module);
+
+        //reverse_array
+        // array, start, one-past-end
+        auto reverse_arraytype = llvm::FunctionType::get(llvm::Type::getVoidTy(context), {llvm::Type::getInt64PtrTy(context), sizet_type, sizet_type}, false);
+        auto reverse_array = llvm::Function::Create(reverse_arraytype, llvm::Function::InternalLinkage, "reverse_array", &module);
+        {
+            auto bb = llvm::BasicBlock::Create(context, "", reverse_array);
+            builder.SetInsertPoint(bb);
+            std::vector<llvm::Value*> args;
+            for (auto &arg: reverse_array->args())
+            {
+                args.push_back(&arg);
+            }
+            auto array = args[0];
+            array->setName("array");
+            auto startarg = args[1];
+            startarg->setName("start");
+            auto onepastendarg = args[2];
+            onepastendarg->setName("onepastend");
+
+            auto start = builder.CreateAlloca(sizet_type, 0, "start");
+            auto end = builder.CreateAlloca(sizet_type, 0, "end");
+            auto temp = builder.CreateAlloca(builder.getInt64Ty(), 0, "temp");
+            builder.CreateStore(startarg, start);
+            builder.CreateStore(builder.CreateSub(onepastendarg, builder.getInt64(1)), end);
+
+            auto whileloop = llvm::BasicBlock::Create(context, "while", reverse_array);
+            auto whileend = llvm::BasicBlock::Create(context, "whileend", reverse_array);
+
+            auto cond = builder.CreateICmpULT(builder.CreateLoad(start), builder.CreateLoad(end));
+            builder.CreateCondBr(cond, whileloop, whileend);
+            {
+                builder.SetInsertPoint(whileloop);
+                builder.CreateStore(builder.CreateLoad(builder.CreateGEP(array, builder.CreateLoad(start))), temp);
+                builder.CreateStore(builder.CreateLoad(builder.CreateGEP(array, builder.CreateLoad(end))), builder.CreateGEP(array, builder.CreateLoad(start)));
+                builder.CreateStore(builder.CreateLoad(temp), builder.CreateGEP(array, builder.CreateLoad(end)));
+                builder.CreateStore(builder.CreateSub(builder.CreateLoad(end), builder.getInt64(1)), end);
+                builder.CreateStore(builder.CreateAdd(builder.CreateLoad(start), builder.getInt64(1)), start);
+                cond = builder.CreateICmpULT(builder.CreateLoad(start), builder.CreateLoad(end));
+                builder.CreateCondBr(cond, whileloop, whileend);
+            }
+            {
+                builder.SetInsertPoint(whileend);
+                builder.CreateRetVoid();
+            }
+        }
+
+        //rotate_array
+        // array, size, depth, amount
+        auto rotate_arraytype = llvm::FunctionType::get(llvm::Type::getVoidTy(context), {llvm::Type::getInt64PtrTy(context), sizet_type, sizet_type, builder.getInt64Ty()}, false);
+        auto rotate_array = llvm::Function::Create(rotate_arraytype, llvm::Function::InternalLinkage, "rotate_array", &module);
+        {
+            auto bb = llvm::BasicBlock::Create(context, "", rotate_array);
+            builder.SetInsertPoint(bb);
+            std::vector<llvm::Value*> args;
+            for (auto &arg: rotate_array->args())
+            {
+                args.push_back(&arg);
+            }
+            auto array = args[0];
+            array->setName("array");
+            auto size = args[1];
+            size->setName("arraysize");
+            auto depth = args[2];
+            depth->setName("depth");
+            auto amount = args[3];
+            amount->setName("amount");
+
+            auto start = builder.CreateSub(size, depth, "start");
+            auto pivot = builder.CreateSub(size, builder.CreateURem(amount, depth), "pivot");
+            builder.CreateCall(reverse_array, {array, start, pivot});
+            builder.CreateCall(reverse_array, {array, pivot, size});
+            builder.CreateCall(reverse_array, {array, start, size});
+
+            builder.CreateRetVoid();
+        }
 
         //popstack
-        // value, stack, pointer to current stack size
-        llvm::FunctionType *popstacktype = llvm::FunctionType::get(llvm::Type::getInt64Ty(context), {llvm::Type::getInt64PtrTy(context), llvm::Type::getInt64PtrTy(context)}, false);
-        llvm::Function *popstack = llvm::Function::Create(popstacktype, llvm::Function::InternalLinkage, "popstack", &module);
+        // stack, pointer to current stack size
+        auto popstacktype = llvm::FunctionType::get(llvm::Type::getInt64Ty(context), {llvm::Type::getInt64PtrTy(context), llvm::Type::getInt64PtrTy(context)}, false);
+        auto popstack = llvm::Function::Create(popstacktype, llvm::Function::InternalLinkage, "popstack", &module);
         {
             llvm::BasicBlock *bb = llvm::BasicBlock::Create(context, "", popstack);
             builder.SetInsertPoint(bb);
@@ -270,8 +346,8 @@ int main(const int argc, const char **argv)
 
         ////pushstack
         //// value, stack, pointer to current stack size, pointer to stack reserved size
-        llvm::FunctionType *pushstacktype = llvm::FunctionType::get(llvm::Type::getVoidTy(context), {llvm::Type::getInt64Ty(context), llvm::PointerType::get(llvm::Type::getInt64PtrTy(context), 0), llvm::Type::getInt64PtrTy(context), llvm::Type::getInt64PtrTy(context)}, false);
-        llvm::Function *pushstack = llvm::Function::Create(pushstacktype, llvm::Function::InternalLinkage, "pushstack", &module);
+        auto pushstacktype = llvm::FunctionType::get(llvm::Type::getVoidTy(context), {llvm::Type::getInt64Ty(context), llvm::PointerType::get(llvm::Type::getInt64PtrTy(context), 0), llvm::Type::getInt64PtrTy(context), llvm::Type::getInt64PtrTy(context)}, false);
+        auto pushstack = llvm::Function::Create(pushstacktype, llvm::Function::InternalLinkage, "pushstack", &module);
         {
             llvm::BasicBlock *bb = llvm::BasicBlock::Create(context, "", pushstack);
             builder.SetInsertPoint(bb);
@@ -311,26 +387,26 @@ int main(const int argc, const char **argv)
             }
         }
 
-        llvm::FunctionType *mainType = llvm::FunctionType::get(llvm::Type::getInt32Ty(context), false);
-        llvm::Constant* mainC = module.getOrInsertFunction("main", mainType);
-        llvm::Function* mainFunc = llvm::dyn_cast<llvm::Function>(mainC);
+        auto mainType = llvm::FunctionType::get(llvm::Type::getInt32Ty(context), false);
+        auto  mainC = module.getOrInsertFunction("main", mainType);
+        auto  mainFunc = llvm::dyn_cast<llvm::Function>(mainC);
 
-        llvm::BasicBlock *bb = llvm::BasicBlock::Create(context, "mainblock", mainFunc);
+        auto bb = llvm::BasicBlock::Create(context, "mainblock", mainFunc);
         builder.SetInsertPoint(bb);
 
-        llvm::AllocaInst *dcalloc = builder.CreateAlloca(llvm::Type::getInt8Ty(context), 0, "dc");
+        auto dcalloc = builder.CreateAlloca(llvm::Type::getInt8Ty(context), 0, "dc");
         auto i1 = llvm::Type::getInt1Ty(context);
-        llvm::AllocaInst *ccalloc = builder.CreateAlloca(i1, 0, "cc");
-        llvm::AllocaInst *stackalloc = builder.CreateAlloca(llvm::Type::getInt64PtrTy(context), 0, "stack");
-        llvm::AllocaInst *stacksize = builder.CreateAlloca(sizet_type, 0, "stacksize");
-        llvm::AllocaInst *stackreserved = builder.CreateAlloca(sizet_type, 0, "stackreserved");
-        llvm::AllocaInst *dummyn = builder.CreateAlloca(builder.getInt64Ty(), 0, "dummyn");
-        llvm::Value *realcall = builder.CreateCall(realloc, {llvm::ConstantPointerNull::get(llvm::Type::getInt64PtrTy(context)), llvm::ConstantInt::get(sizet_type, args::get(startstacksize) * sizeof(size_t))});
+        auto ccalloc = builder.CreateAlloca(i1, 0, "cc");
+        auto stackalloc = builder.CreateAlloca(llvm::Type::getInt64PtrTy(context), 0, "stack");
+        auto stacksize = builder.CreateAlloca(sizet_type, 0, "stacksize");
+        auto stackreserved = builder.CreateAlloca(sizet_type, 0, "stackreserved");
+        auto dummyn = builder.CreateAlloca(builder.getInt64Ty(), 0, "dummyn");
+        auto realcall = builder.CreateCall(realloc, {llvm::ConstantPointerNull::get(llvm::Type::getInt64PtrTy(context)), llvm::ConstantInt::get(sizet_type, args::get(startstacksize) * sizeof(size_t))});
         builder.CreateStore(realcall, stackalloc, false);
         builder.CreateStore(llvm::ConstantInt::get(sizet_type, 0), stacksize, false);
         builder.CreateStore(llvm::ConstantInt::get(sizet_type, args::get(startstacksize)), stackreserved, false);
-        llvm::Value *printdigit = builder.CreateGlobalStringPtr("stack size: %llu, reserved: %llu\n");
-        llvm::Value *printresult = builder.CreateGlobalStringPtr("stack size: %llu, reserved: %llu, retvalue: %llu\n");
+        auto printdigit = builder.CreateGlobalStringPtr("stack size: %llu, reserved: %llu\n");
+        auto printresult = builder.CreateGlobalStringPtr("stack size: %llu, reserved: %llu, retvalue: %llu\n");
         auto blank = llvm::BasicBlock::Create(context, "blank", mainFunc);
         llvm::ReturnInst::Create(context, llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0), blank);
 
@@ -652,8 +728,34 @@ int main(const int argc, const char **argv)
                                 }
                             }
                             break;
-                            /*
                         case OP::ROLL:
+                            {
+                                auto iftrue = llvm::BasicBlock::Create(context, "iftrue", mainFunc);
+                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), builder.getInt64(2));
+                                builder.CreateCondBr(cond, iftrue, nextbb);
+                                {
+                                    builder.SetInsertPoint(iftrue);
+                                    auto amount = builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize});
+                                    auto depth = builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize});
+
+                                    // if (depth < 0 || depth > stacksize)
+                                    auto baddepth = builder.CreateOr(builder.CreateICmpSLT(depth, builder.getInt64(0)), builder.CreateICmpUGT(depth, builder.CreateLoad(stacksize)));
+                                    auto badbb = llvm::BasicBlock::Create(context, "baddepth", mainFunc);
+                                    auto goodbb = llvm::BasicBlock::Create(context, "gooddepth", mainFunc);
+                                    builder.CreateCondBr(baddepth, badbb, goodbb);
+                                    {
+                                        builder.SetInsertPoint(badbb);
+                                        builder.CreateCall(pushstack, {depth, stackalloc, stacksize, stackreserved});
+                                        builder.CreateCall(pushstack, {amount, stackalloc, stacksize, stackreserved});
+                                        builder.CreateBr(nextbb);
+                                    }
+                                    {
+                                        builder.SetInsertPoint(goodbb);
+                                        builder.CreateCall(rotate_array, {builder.CreateLoad(stackalloc), builder.CreateLoad(stacksize), depth, amount});
+                                    }
+                                }
+                            }
+                            /*
                             if (stack.size() >= 2)
                             {
                                 auto amount = stack.back();
@@ -678,9 +780,8 @@ int main(const int argc, const char **argv)
 
                                     std::rotate(stack.rbegin(), newtop, rollend);
                                 }
-                            }
+                            }*/
                             break;
-                            */
                         case OP::INN:
                             {
                                 llvm::Value *getn = builder.CreateGlobalStringPtr("%Ld");
