@@ -297,11 +297,13 @@ int main(const int argc, const char **argv)
             auto onepastendarg = args[2];
             onepastendarg->setName("onepastend");
 
+#define GETINT llvm::ConstantInt::get
+
             auto start = builder.CreateAlloca(number_type, 0, "start");
             auto end = builder.CreateAlloca(number_type, 0, "end");
             auto temp = builder.CreateAlloca(number_type, 0, "temp");
             builder.CreateStore(startarg, start);
-            builder.CreateStore(builder.CreateSub(onepastendarg, llvm::ConstantInt::get(number_type, 1)), end);
+            builder.CreateStore(builder.CreateSub(onepastendarg, GETINT(number_type, 1)), end);
 
             auto whileloop = llvm::BasicBlock::Create(context, "while", reverse_array);
             auto whileend = llvm::BasicBlock::Create(context, "whileend", reverse_array);
@@ -313,8 +315,8 @@ int main(const int argc, const char **argv)
                 builder.CreateStore(builder.CreateLoad(builder.CreateGEP(array, builder.CreateLoad(start))), temp);
                 builder.CreateStore(builder.CreateLoad(builder.CreateGEP(array, builder.CreateLoad(end))), builder.CreateGEP(array, builder.CreateLoad(start)));
                 builder.CreateStore(builder.CreateLoad(temp), builder.CreateGEP(array, builder.CreateLoad(end)));
-                builder.CreateStore(builder.CreateSub(builder.CreateLoad(end), llvm::ConstantInt::get(number_type, 1)), end);
-                builder.CreateStore(builder.CreateAdd(builder.CreateLoad(start), llvm::ConstantInt::get(number_type, 1)), start);
+                builder.CreateStore(builder.CreateSub(builder.CreateLoad(end), GETINT(number_type, 1)), end);
+                builder.CreateStore(builder.CreateAdd(builder.CreateLoad(start), GETINT(number_type, 1)), start);
                 cond = builder.CreateICmpULT(builder.CreateLoad(start), builder.CreateLoad(end));
                 builder.CreateCondBr(cond, whileloop, whileend);
             }
@@ -372,16 +374,16 @@ int main(const int argc, const char **argv)
             auto empty = llvm::BasicBlock::Create(context, "empty", popstack);
             auto nempty = llvm::BasicBlock::Create(context, "nempty", popstack);
 
-            auto cond = builder.CreateICmpEQ(llvm::ConstantInt::get(number_type, 0), builder.CreateLoad(stacksize));
+            auto cond = builder.CreateICmpEQ(GETINT(number_type, 0), builder.CreateLoad(stacksize));
             builder.CreateCondBr(cond, empty, nempty);
 
             {
                 builder.SetInsertPoint(empty);
-                builder.CreateRet(llvm::ConstantInt::get(number_type, 0));
+                builder.CreateRet(GETINT(number_type, 0));
             }
             {
                 builder.SetInsertPoint(nempty);
-                builder.CreateStore(builder.CreateSub(builder.CreateLoad(stacksize), llvm::ConstantInt::get(number_type, 1)), stacksize);
+                builder.CreateStore(builder.CreateSub(builder.CreateLoad(stacksize), GETINT(number_type, 1)), stacksize);
                 builder.CreateRet(builder.CreateLoad(builder.CreateGEP(stack, builder.CreateLoad(stacksize))));
             }
         }
@@ -416,15 +418,15 @@ int main(const int argc, const char **argv)
 
             {
                 builder.SetInsertPoint(full);
-                builder.CreateStore(builder.CreateMul(builder.CreateLoad(reservedsize), llvm::ConstantInt::get(number_type, 2)), reservedsize);
-                llvm::Value *realcall = builder.CreateCall(realloc, {builder.CreateLoad(stack), builder.CreateMul(builder.CreateLoad(reservedsize), llvm::ConstantInt::get(number_type, (sizeof(size_t))))});
+                builder.CreateStore(builder.CreateMul(builder.CreateLoad(reservedsize), GETINT(number_type, 2)), reservedsize);
+                llvm::Value *realcall = builder.CreateCall(realloc, {builder.CreateLoad(stack), builder.CreateMul(builder.CreateLoad(reservedsize), GETINT(number_type, (sizeof(size_t))))});
                 builder.CreateStore(realcall, stack, false);
                 builder.CreateBr(push);
             }
             {
                 builder.SetInsertPoint(push);
                 builder.CreateStore(value, builder.CreateGEP(builder.CreateLoad(stack), builder.CreateLoad(stacksize)));
-                builder.CreateStore(builder.CreateAdd(builder.CreateLoad(stacksize), llvm::ConstantInt::get(number_type, 1)), stacksize);
+                builder.CreateStore(builder.CreateAdd(builder.CreateLoad(stacksize), GETINT(number_type, 1)), stacksize);
                 builder.CreateRetVoid();
             }
         }
@@ -443,12 +445,12 @@ int main(const int argc, const char **argv)
         auto stacksize = builder.CreateAlloca(number_type, 0, "stacksize");
         auto stackreserved = builder.CreateAlloca(number_type, 0, "stackreserved");
         auto dummyn = builder.CreateAlloca(number_type, 0, "dummyn");
-        auto realcall = builder.CreateCall(realloc, {llvm::ConstantPointerNull::get(stack_type), llvm::ConstantInt::get(number_type, args::get(startstacksize) * sizeof(size_t))});
+        auto realcall = builder.CreateCall(realloc, {llvm::ConstantPointerNull::get(stack_type), GETINT(number_type, args::get(startstacksize) * sizeof(size_t))});
         builder.CreateStore(realcall, stackalloc, false);
-        builder.CreateStore(llvm::ConstantInt::get(number_type, 0), stacksize, false);
-        builder.CreateStore(llvm::ConstantInt::get(number_type, args::get(startstacksize)), stackreserved, false);
+        builder.CreateStore(GETINT(number_type, 0), stacksize, false);
+        builder.CreateStore(GETINT(number_type, args::get(startstacksize)), stackreserved, false);
         auto blank = llvm::BasicBlock::Create(context, "blank", mainFunc);
-        llvm::ReturnInst::Create(context, llvm::ConstantInt::get(int_type, 0), blank);
+        llvm::ReturnInst::Create(context, GETINT(int_type, 0), blank);
 
 
 
@@ -472,8 +474,8 @@ int main(const int argc, const char **argv)
         if (!exit)
         {
             // first set dc and cc
-            builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(startdc)), dcalloc, false);
-            builder.CreateStore(llvm::ConstantInt::get(i1, static_cast<uint8_t>(startcc)), ccalloc, false);
+            builder.CreateStore(GETINT(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(startdc)), dcalloc, false);
+            builder.CreateStore(GETINT(i1, static_cast<uint8_t>(startcc)), ccalloc, false);
 
             std::map<std::shared_ptr<ColorBlock>, llvm::BasicBlock*> blocks;
             for (auto &colorBlock: map)
@@ -537,7 +539,7 @@ int main(const int argc, const char **argv)
                                     });
                             }))
                 {
-                    builder.CreateRet(llvm::ConstantInt::get(int_type, 0));
+                    builder.CreateRet(GETINT(int_type, 0));
                     continue;
                 }
                 auto getNeighbor = [](std::array<std::array<ColorBlock::Neighbor, 2>, 4> &neighbors, DC dc, CC cc)
@@ -586,16 +588,16 @@ int main(const int argc, const char **argv)
                 builder.CreateCondBr(cond, left, right);
                 builder.SetInsertPoint(left);
                 auto lsw = builder.CreateSwitch(builder.CreateLoad(dcalloc), blank, 4);
-                lsw->addCase(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::North)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::North, CC::Left})->second)->second);
-                lsw->addCase(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::East)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::East, CC::Left})->second)->second);
-                lsw->addCase(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::South)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::South, CC::Left})->second)->second);
-                lsw->addCase(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::West)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::West, CC::Left})->second)->second);
+                lsw->addCase(GETINT(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::North)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::North, CC::Left})->second)->second);
+                lsw->addCase(GETINT(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::East)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::East, CC::Left})->second)->second);
+                lsw->addCase(GETINT(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::South)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::South, CC::Left})->second)->second);
+                lsw->addCase(GETINT(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::West)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::West, CC::Left})->second)->second);
                 builder.SetInsertPoint(right);
                 auto rsw = builder.CreateSwitch(builder.CreateLoad(dcalloc), blank, 4);
-                rsw->addCase(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::North)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::North, CC::Right})->second)->second);
-                rsw->addCase(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::East)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::East, CC::Right})->second)->second);
-                rsw->addCase(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::South)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::South, CC::Right})->second)->second);
-                rsw->addCase(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::West)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::West, CC::Right})->second)->second);
+                rsw->addCase(GETINT(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::North)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::North, CC::Right})->second)->second);
+                rsw->addCase(GETINT(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::East)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::East, CC::Right})->second)->second);
+                rsw->addCase(GETINT(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::South)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::South, CC::Right})->second)->second);
+                rsw->addCase(GETINT(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(DC::West)), neighborbbs.find(rneighbors.find(std::tuple<DC, CC>{DC::West, CC::Right})->second)->second);
                 
                 for(auto neighbor: neighbors)
                 {
@@ -604,8 +606,8 @@ int main(const int argc, const char **argv)
                     auto bb = neighborbbs.find(neighbor)->second;
                     auto nextbb = blocks.find(neighbor->block.lock())->second;
                     builder.SetInsertPoint(bb);
-                    builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(newdc)), dcalloc);
-                    builder.CreateStore(llvm::ConstantInt::get(i1, static_cast<uint8_t>(newcc)), ccalloc);
+                    builder.CreateStore(GETINT(llvm::Type::getInt8Ty(context), static_cast<uint8_t>(newdc)), dcalloc);
+                    builder.CreateStore(GETINT(i1, static_cast<uint8_t>(newcc)), ccalloc);
 
                     if (trace)
                     {
@@ -617,7 +619,7 @@ int main(const int argc, const char **argv)
                     switch (neighbor->operation)
                     {
                         case OP::PUSH:
-                            builder.CreateCall(pushstack, {llvm::ConstantInt::get(number_type, block->size), stackalloc, stacksize, stackreserved});
+                            builder.CreateCall(pushstack, {GETINT(number_type, block->size), stackalloc, stacksize, stackreserved});
                             break;
 
                         case OP::POP:
@@ -627,7 +629,7 @@ int main(const int argc, const char **argv)
                         case OP::ADD:
                             {
                                 auto iftrue = llvm::BasicBlock::Create(context, "iftrue", mainFunc);
-                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), llvm::ConstantInt::get(number_type, 2));
+                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), GETINT(number_type, 2));
                                 builder.CreateCondBr(cond, iftrue, nextbb);
                                 {
                                     builder.SetInsertPoint(iftrue);
@@ -640,7 +642,7 @@ int main(const int argc, const char **argv)
                         case OP::SUBTRACT:
                             {
                                 auto iftrue = llvm::BasicBlock::Create(context, "iftrue", mainFunc);
-                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), llvm::ConstantInt::get(number_type, 2));
+                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), GETINT(number_type, 2));
                                 builder.CreateCondBr(cond, iftrue, nextbb);
                                 {
                                     builder.SetInsertPoint(iftrue);
@@ -653,7 +655,7 @@ int main(const int argc, const char **argv)
                         case OP::MULTIPLY:
                             {
                                 auto iftrue = llvm::BasicBlock::Create(context, "iftrue", mainFunc);
-                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), llvm::ConstantInt::get(number_type, 2));
+                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), GETINT(number_type, 2));
                                 builder.CreateCondBr(cond, iftrue, nextbb);
                                 {
                                     builder.SetInsertPoint(iftrue);
@@ -666,7 +668,7 @@ int main(const int argc, const char **argv)
                         case OP::DIVIDE:
                             {
                                 auto iftrue = llvm::BasicBlock::Create(context, "iftrue", mainFunc);
-                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), llvm::ConstantInt::get(number_type, 2));
+                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), GETINT(number_type, 2));
                                 builder.CreateCondBr(cond, iftrue, nextbb);
                                 {
                                     builder.SetInsertPoint(iftrue);
@@ -679,7 +681,7 @@ int main(const int argc, const char **argv)
                         case OP::MOD:
                             {
                                 auto iftrue = llvm::BasicBlock::Create(context, "iftrue", mainFunc);
-                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), llvm::ConstantInt::get(number_type, 2));
+                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), GETINT(number_type, 2));
                                 builder.CreateCondBr(cond, iftrue, nextbb);
                                 {
                                     builder.SetInsertPoint(iftrue);
@@ -688,7 +690,7 @@ int main(const int argc, const char **argv)
                                     auto rem = builder.CreateSRem(second, first);
                                     auto neg = llvm::BasicBlock::Create(context, "negative", mainFunc);
                                     auto nonneg = llvm::BasicBlock::Create(context, "nonnegative", mainFunc);
-                                    auto cond = builder.CreateICmpSLT(rem, llvm::ConstantInt::get(number_type, 0));
+                                    auto cond = builder.CreateICmpSLT(rem, GETINT(number_type, 0));
                                     builder.CreateCondBr(cond, neg, nonneg);
                                     {
                                         builder.SetInsertPoint(neg);
@@ -705,12 +707,12 @@ int main(const int argc, const char **argv)
                         case OP::NOT:
                             {
                                 auto iftrue = llvm::BasicBlock::Create(context, "iftrue", mainFunc);
-                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), llvm::ConstantInt::get(number_type, 1));
+                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), GETINT(number_type, 1));
                                 builder.CreateCondBr(cond, iftrue, nextbb);
                                 {
                                     builder.SetInsertPoint(iftrue);
                                     auto value = builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize});
-                                    auto cond = builder.CreateICmpEQ(value, llvm::ConstantInt::get(number_type, 0));
+                                    auto cond = builder.CreateICmpEQ(value, GETINT(number_type, 0));
                                     builder.CreateCall(pushstack, {builder.CreateIntCast(cond, number_type, false), stackalloc, stacksize, stackreserved});
                                 }
                             }
@@ -718,7 +720,7 @@ int main(const int argc, const char **argv)
                         case OP::GREATER:
                             {
                                 auto iftrue = llvm::BasicBlock::Create(context, "iftrue", mainFunc);
-                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), llvm::ConstantInt::get(number_type, 2));
+                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), GETINT(number_type, 2));
                                 builder.CreateCondBr(cond, iftrue, nextbb);
                                 {
                                     builder.SetInsertPoint(iftrue);
@@ -732,12 +734,12 @@ int main(const int argc, const char **argv)
                         case OP::POINTER:
                             {
                                 auto iftrue = llvm::BasicBlock::Create(context, "iftrue", mainFunc);
-                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), llvm::ConstantInt::get(number_type, 1));
+                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), GETINT(number_type, 1));
                                 builder.CreateCondBr(cond, iftrue, nextbb);
                                 {
                                     builder.SetInsertPoint(iftrue);
                                     auto value = builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize});
-                                    auto rotation = builder.CreateIntCast(builder.CreateSRem(value, llvm::ConstantInt::get(number_type, 4)), builder.getInt8Ty(), false);
+                                    auto rotation = builder.CreateIntCast(builder.CreateSRem(value, GETINT(number_type, 4)), builder.getInt8Ty(), false);
                                     builder.CreateStore(builder.CreateSRem(builder.CreateAdd(builder.CreateLoad(dcalloc), rotation), builder.getInt8(4)), dcalloc);
                                 }
                             }
@@ -745,12 +747,12 @@ int main(const int argc, const char **argv)
                         case OP::SWITCH:
                             {
                                 auto iftrue = llvm::BasicBlock::Create(context, "iftrue", mainFunc);
-                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), llvm::ConstantInt::get(number_type, 1));
+                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), GETINT(number_type, 1));
                                 builder.CreateCondBr(cond, iftrue, nextbb);
                                 {
                                     builder.SetInsertPoint(iftrue);
                                     auto value = builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize});
-                                    auto odd = builder.CreateIntCast(builder.CreateSRem(value, llvm::ConstantInt::get(number_type, 2)), builder.getInt1Ty(), false);
+                                    auto odd = builder.CreateIntCast(builder.CreateSRem(value, GETINT(number_type, 2)), builder.getInt1Ty(), false);
                                     builder.CreateStore(builder.CreateXor(builder.CreateLoad(ccalloc), odd), ccalloc);
                                 }
                             }
@@ -758,7 +760,7 @@ int main(const int argc, const char **argv)
                         case OP::DUPLICATE:
                             {
                                 auto iftrue = llvm::BasicBlock::Create(context, "iftrue", mainFunc);
-                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), llvm::ConstantInt::get(number_type, 1));
+                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), GETINT(number_type, 1));
                                 builder.CreateCondBr(cond, iftrue, nextbb);
                                 {
                                     builder.SetInsertPoint(iftrue);
@@ -771,7 +773,7 @@ int main(const int argc, const char **argv)
                         case OP::ROLL:
                             {
                                 auto iftrue = llvm::BasicBlock::Create(context, "iftrue", mainFunc);
-                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), llvm::ConstantInt::get(number_type, 2));
+                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), GETINT(number_type, 2));
                                 builder.CreateCondBr(cond, iftrue, nextbb);
                                 {
                                     builder.SetInsertPoint(iftrue);
@@ -779,7 +781,7 @@ int main(const int argc, const char **argv)
                                     auto depth = builder.CreateCall(popstack, {builder.CreateLoad(stackalloc), stacksize});
 
                                     // if (depth < 0 || depth > stacksize)
-                                    auto baddepth = builder.CreateOr(builder.CreateICmpSLT(depth, llvm::ConstantInt::get(number_type, 0)), builder.CreateICmpUGT(depth, builder.CreateLoad(stacksize)));
+                                    auto baddepth = builder.CreateOr(builder.CreateICmpSLT(depth, GETINT(number_type, 0)), builder.CreateICmpUGT(depth, builder.CreateLoad(stacksize)));
                                     auto badbb = llvm::BasicBlock::Create(context, "baddepth", mainFunc);
                                     auto goodbb = llvm::BasicBlock::Create(context, "gooddepth", mainFunc);
                                     builder.CreateCondBr(baddepth, badbb, goodbb);
@@ -837,7 +839,7 @@ int main(const int argc, const char **argv)
                         case OP::OUTN:
                             {
                                 auto iftrue = llvm::BasicBlock::Create(context, "iftrue", mainFunc);
-                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), llvm::ConstantInt::get(number_type, 1));
+                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), GETINT(number_type, 1));
                                 builder.CreateCondBr(cond, iftrue, nextbb);
                                 {
                                     builder.SetInsertPoint(iftrue);
@@ -850,7 +852,7 @@ int main(const int argc, const char **argv)
                         case OP::OUTC:
                             {
                                 auto iftrue = llvm::BasicBlock::Create(context, "iftrue", mainFunc);
-                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), llvm::ConstantInt::get(number_type, 1));
+                                auto cond = builder.CreateICmpUGE(builder.CreateLoad(stacksize), GETINT(number_type, 1));
                                 builder.CreateCondBr(cond, iftrue, nextbb);
                                 {
                                     builder.SetInsertPoint(iftrue);
@@ -860,7 +862,7 @@ int main(const int argc, const char **argv)
                             }
                             break;
                         case OP::EXIT:
-                            builder.CreateRet(llvm::ConstantInt::get(number_type, 0));
+                            builder.CreateRet(GETINT(number_type, 0));
                             break;
                         default:
                             break;
