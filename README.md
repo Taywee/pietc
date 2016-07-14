@@ -1,6 +1,9 @@
 # pietc
 
-A piet LLVM compiler.  Does not link
+A piet LLVM compiler, using imagemagick to parse images.  Compiles an object
+file with a main symbol for linking with some compiler toolchain (or native
+linker if you want to get down and dirty).  Lets you do detailed tracing to
+debug your own programs.
 
 The program's own help menu is as such:
 
@@ -30,6 +33,51 @@ The program's own help menu is as such:
       input                             Input file to use
       "--" can be used to terminate flag options and force all following
       arguments to be treated as positional options
+```
+
+# Sample runs (with included png files)
+
+```
+$ ./pietc -o/tmp/test.o -O3 hello1.png  
+autodetected codel size: 1
+$ cc -o/tmp/test /tmp/test.o
+$ /tmp/test 
+Hello world!
+$ ./pietc -t -o/tmp/test.o -O3 hello1.png 
+autodetected codel size: 1
+$ cc -o/tmp/test /tmp/test.o                  
+$ /tmp/test | head -n 30                 
+##########
+Codel   : NR
+Size    : 72
+Exits   : 
+    EL  : 10x0
+    ER  : 10x0
+    SL  : 9x10
+    SR  : 5x10
+
+Running operation PUSH size 72
+##########
+Codel   : DR
+Size    : 1
+Exits   : 
+    EL  : 11x0
+    ER  : 11x0
+    SL  : 11x0
+    SR  : 11x0
+    WL  : 11x0
+    WR  : 11x0
+
+Running operation OUTC size 1
+H##########
+Codel   : NM
+Size    : 101
+Exits   : 
+    EL  : 18x0
+    ER  : 18x9
+    SL  : 18x9
+    SR  : 9x9
+$ 
 ```
 
 # Compiler ideas

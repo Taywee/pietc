@@ -63,7 +63,7 @@ int main(const int argc, const char **argv)
     args::Flag trace(parser, "trace", "Trace program run", {'t', "trace"});
     args::Flag unknownWhite(parser, "unknown-white", "Make unknown colors white", {"unknown-white"});
     args::Flag unknownBlack(parser, "unknown-black", "Make unknown colors black", {"unknown-black"});
-    args::ValueFlag<unsigned int> optlevel(parser, "optlevel", "Specify the optimization level (default 1)", {'O'}, 1);
+    args::ValueFlag<unsigned int> optlevel(parser, "optlevel", "Specify the optimization level (default 1)", {'O'}, 2);
     args::ValueFlag<size_t> startstacksize(parser, "size", "Specify the starting stack size. The stack resizes when necessary regardless. (defaults to 64)", {'s', "stack"}, 64);
     args::ValueFlag<std::string> prompt(parser, "prompt", "Change prompt for input operations", {'p', "prompt"}, "? ");
     args::ValueFlag<std::string> output(parser, "output", "Output object filename to print (defaults to the input filename + .o)", {'o', "output"});
@@ -197,6 +197,8 @@ int main(const int argc, const char **argv)
                     break;
             }
         }
+
+        std::cerr << "Parsed program, building LLVM" << std::endl;
 
         llvm::LLVMContext context;
         llvm::IRBuilder<> builder(context);
@@ -900,6 +902,8 @@ int main(const int argc, const char **argv)
             }
         }
 
+        std::cerr << "LLVM built, optimizing and emitting" << std::endl;
+
         llvm::legacy::PassManager passManager;
         llvm::legacy::FunctionPassManager fpm(&module);
         fpm.add(llvm::createVerifierPass());
@@ -907,7 +911,7 @@ int main(const int argc, const char **argv)
         const unsigned int optLevel = args::get(optlevel) > 3 ? 3 : args::get(optlevel);
         pmb.OptLevel = optLevel;
         pmb.SizeLevel = 0;
-        if (optLevel > 1)
+        if (optLevel > 2)
             pmb.Inliner = llvm::createFunctionInliningPass();
         else
             pmb.Inliner = llvm::createAlwaysInlinerPass();
