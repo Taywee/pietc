@@ -16,7 +16,7 @@
 #include <functional>
 #include <unordered_map>
 
-#include <args.hxx>
+#include "args.hxx"
 #include <Magick++.h>
 
 #include <llvm/Transforms/IPO/PassManagerBuilder.h>
@@ -25,6 +25,9 @@
 #include <llvm/Bitcode/ReaderWriter.h>
 #include <llvm/CodeGen/AsmPrinter.h>
 #include <llvm/ExecutionEngine/GenericValue.h>
+#include <llvm/Support/TargetSelect.h>
+#include <llvm/Support/TargetRegistry.h>
+#include <llvm/Support/FileSystem.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -60,9 +63,10 @@ int main(const int argc, const char **argv)
     args::Flag trace(parser, "trace", "Trace program run", {'t', "trace"});
     args::Flag unknownWhite(parser, "unknown-white", "Make unknown colors white", {"unknown-white"});
     args::Flag unknownBlack(parser, "unknown-black", "Make unknown colors black", {"unknown-black"});
+    args::ValueFlag<unsigned int> optlevel(parser, "optlevel", "Specify the optimization level", {'O'}, 1);
     args::ValueFlag<size_t> startstacksize(parser, "size", "Specify the starting stack size", {'s', "stack"}, 1);
     args::ValueFlag<std::string> prompt(parser, "prompt", "Prompt for input operations", {'p', "prompt"}, "? ");
-    args::ValueFlag<std::string> output(parser, "output", "Output filename to print", {'o', "output"});
+    args::ValueFlag<std::string> output(parser, "output", "Output filename to print", {'o', "output"}, "a.out.o");
     args::Group required(parser, "", args::Group::Validators::All);
     args::Positional<std::string> input(required, "input", "Input file to use");
 
@@ -840,6 +844,11 @@ int main(const int argc, const char **argv)
                             break;
                         case OP::INN:
                             {
+                                if (!args::get(prompt).empty())
+                                {
+                                    llvm::Value *ps = builder.CreateGlobalStringPtr("%s");
+                                    builder.CreateCall(printf, {ps, builder.CreateGlobalStringPtr(args::get(prompt))});
+                                }
                                 llvm::Value *getn = builder.CreateGlobalStringPtr("%Ld");
                                 builder.CreateCall(scanf, {getn, dummyn});
                                 builder.CreateCall(pushstack, {builder.CreateLoad(dummyn), stackalloc, stacksize, stackreserved});
@@ -847,6 +856,11 @@ int main(const int argc, const char **argv)
                             break;
                         case OP::INC:
                             {
+                                if (!args::get(prompt).empty())
+                                {
+                                    llvm::Value *ps = builder.CreateGlobalStringPtr("%s");
+                                    builder.CreateCall(printf, {ps, builder.CreateGlobalStringPtr(args::get(prompt))});
+                                }
                                 builder.CreateCall(pushstack, { builder.CreateIntCast(builder.CreateCall(getchar), number_type, CHARISSIGNED), stackalloc, stacksize, stackreserved});
                             }
                             break;
@@ -889,25 +903,52 @@ int main(const int argc, const char **argv)
         llvm::legacy::PassManager passManager;
         llvm::legacy::FunctionPassManager fpm(&module);
         fpm.add(llvm::createVerifierPass());
-        std::unique_ptr<std::ofstream> filestream;
-        std::ostream *raw_ostream = &std::cout;
-        if (output)
-        {
-            filestream = std::unique_ptr<std::ofstream>(new std::ofstream(args::get(output), std::ios::binary));
-            raw_ostream = filestream.get();
-        }
-        llvm::raw_os_ostream ostream{*raw_ostream};
         llvm::PassManagerBuilder pmb;
-        pmb.OptLevel = 3;
+        const unsigned int optLevel = args::get(optlevel) > 3 ? 3 : args::get(optlevel);
+        pmb.OptLevel = optLevel;
         pmb.SizeLevel = 0;
-        pmb.Inliner = llvm::createFunctionInliningPass();
-        pmb.DisableUnrollLoops = false;
-        pmb.LoopVectorize = true;
-        pmb.SLPVectorize = true;
+        if (optLevel > 1)
+            pmb.Inliner = llvm::createFunctionInliningPass();
+        else
+            pmb.Inliner = llvm::createAlwaysInlinerPass();
+        pmb.DisableUnrollLoops = optLevel == 0;
+        pmb.LoopVectorize = optLevel > 1;
+        pmb.SLPVectorize = optLevel > 1;
         pmb.populateFunctionPassManager(fpm);
         pmb.populateModulePassManager(passManager);
-        passManager.add(llvm::createPrintModulePass(ostream));
+
+        auto TargetTriple = llvm::sys::getDefaultTargetTriple();
+        llvm::InitializeAllTargetInfos();
+        llvm::InitializeAllTargets();
+        llvm::InitializeAllTargetMCs();
+        llvm::InitializeAllAsmParsers();
+        llvm::InitializeAllAsmPrinters();
+        std::string Error;
+        auto Target = llvm::TargetRegistry::lookupTarget(TargetTriple, Error);
+        if (!Target) {
+            std::cerr << Error;
+            return 1;
+        }
+        auto CPU = "generic";
+        auto Features = "";
+
+        llvm::TargetOptions opt;
+        llvm::Reloc::Model RM = llvm::Reloc::Model::Default;
+        auto TargetMachine = Target->createTargetMachine(TargetTriple, CPU, Features, opt, RM);
+
+        module.setDataLayout(TargetMachine->createDataLayout());
+        module.setTargetTriple(TargetTriple);
+
+        auto FileType = llvm::TargetMachine::CGFT_ObjectFile;
+
+        std::error_code EC;
+        llvm::raw_fd_ostream dest(args::get(output), EC, llvm::sys::fs::F_None);
+        if (TargetMachine->addPassesToEmitFile(passManager, dest, FileType)) {
+            std::cerr << "TargetMachine can't emit a file of this type\n";
+            return 1;
+        }
         passManager.run(module);
+
         return 0;
     }
     catch (const Magick::Exception &e)

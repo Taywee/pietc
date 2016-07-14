@@ -1,8 +1,0 @@
-DEFAULT:
-  cxxflags: [-std=c++11]
-  cxxflagscli: [Magick++-config --cppflags --cxxflags, llvm-config --cxxflags]
-  lflagscli: [Magick++-config --libs --ldflags, llvm-config --cxxflags --libs]
-  debug:
-    cflags: [-DDEBUG, -D_DEBUG, -O0, -ggdb]
-  release:
-    cflags: [-O3, -DNDEBUG]

@@ -1,23 +1,11 @@
-PREFIX ?= /usr/local
-.PHONY: phony release debug clean
+ALLFLAGS = -std=c++11 $(shell Magick++-config --cppflags --cxxflags --libs --ldflags) $(shell llvm-config --cxxflags --libs) -O2 -DNDEBUG
+CXX ?= c++
 
-debug: phony
-	./configure -d pietc
-	ninja
+.PHONY : all
+all: pietc
 
-release: pietc
-
-pietc: phony
-	./configure pietc
-	ninja
+pietc: $(wildcard *.?xx)
+	$(CXX) -opietc main.cxx $(ALLFLAGS)
 
 clean:
-	ninja -tclean
-
-install : pietc
-	install -m 0755 -d $(PREFIX)/bin
-	strip pietc
-	install -m 0755 -t $(PREFIX)/bin pietc
-
-uninstall :
-	-rm $(PREFIX)/bin/pietc
+	rm pietc
