@@ -55,18 +55,18 @@ static void PrintField(const Field &field, const Map &map);
 
 int main(const int argc, const char **argv)
 {
-    args::ArgumentParser parser("A LLVM piet compiler, which can compile a Piet program "
-            "into LLVM IR, LLVM bitcode, native assembly, native object code, or an "
-            "executable, as well as run the optimized JIT compiled Piet program immediately.");
+    args::ArgumentParser parser("A LLVM piet compiler, which simply compiles a"
+            " piet program into an object file that you can compile with your"
+            " favorite C compiler.");
     args::HelpFlag help(parser, "help", "Display this help menu", {'h', "help"});
     args::ValueFlag<size_t> cs(parser, "size", "Set the codel size manually (0 tries to auto-detect, which usually works, but may be imperfect in certain scenarios)", {"cs", "codel-size"}, 0);
     args::Flag trace(parser, "trace", "Trace program run", {'t', "trace"});
     args::Flag unknownWhite(parser, "unknown-white", "Make unknown colors white", {"unknown-white"});
     args::Flag unknownBlack(parser, "unknown-black", "Make unknown colors black", {"unknown-black"});
-    args::ValueFlag<unsigned int> optlevel(parser, "optlevel", "Specify the optimization level", {'O'}, 1);
-    args::ValueFlag<size_t> startstacksize(parser, "size", "Specify the starting stack size", {'s', "stack"}, 1);
-    args::ValueFlag<std::string> prompt(parser, "prompt", "Prompt for input operations", {'p', "prompt"}, "? ");
-    args::ValueFlag<std::string> output(parser, "output", "Output filename to print", {'o', "output"}, "a.out.o");
+    args::ValueFlag<unsigned int> optlevel(parser, "optlevel", "Specify the optimization level (default 1)", {'O'}, 1);
+    args::ValueFlag<size_t> startstacksize(parser, "size", "Specify the starting stack size. The stack resizes when necessary regardless. (defaults to 64)", {'s', "stack"}, 64);
+    args::ValueFlag<std::string> prompt(parser, "prompt", "Change prompt for input operations", {'p', "prompt"}, "? ");
+    args::ValueFlag<std::string> output(parser, "output", "Output object filename to print (defaults to the input filename + .o)", {'o', "output"});
     args::Group required(parser, "", args::Group::Validators::All);
     args::Positional<std::string> input(required, "input", "Input file to use");
 
@@ -942,7 +942,8 @@ int main(const int argc, const char **argv)
         auto FileType = llvm::TargetMachine::CGFT_ObjectFile;
 
         std::error_code EC;
-        llvm::raw_fd_ostream dest(args::get(output), EC, llvm::sys::fs::F_None);
+        std::string outstring = static_cast<bool>(output) ? args::get(output) : (args::get(input) + ".o");
+        llvm::raw_fd_ostream dest(outstring, EC, llvm::sys::fs::F_None);
         if (TargetMachine->addPassesToEmitFile(passManager, dest, FileType)) {
             std::cerr << "TargetMachine can't emit a file of this type\n";
             return 1;
