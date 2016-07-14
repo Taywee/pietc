@@ -2,6 +2,38 @@
 
 A piet LLVM compiler.  Does not link
 
+The program's own help menu is as such:
+
+```
+  ./pietc {OPTIONS} [input]
+
+    A LLVM piet compiler, which simply compiles a piet program into an object
+    file that you can compile with your favorite C compiler.
+
+  OPTIONS:
+
+      -h, --help                        Display this help menu
+      --codel-size=[size], --cs=[size]  Set the codel size manually (0 tries to
+                                        auto-detect, which usually works, but
+                                        may be imperfect in certain scenarios)
+      -t, --trace                       Trace program run
+      --unknown-white                   Make unknown colors white
+      --unknown-black                   Make unknown colors black
+      -O[optlevel]                      Specify the optimization level (default
+                                        1)
+      -s[size], --stack=[size]          Specify the starting stack size. The
+                                        stack resizes when necessary regardless.
+                                        (defaults to 64)
+      -p[prompt], --prompt=[prompt]     Change prompt for input operations
+      -o[output], --output=[output]     Output object filename to print
+                                        (defaults to the input filename + .o)
+      input                             Input file to use
+      "--" can be used to terminate flag options and force all following
+      arguments to be treated as positional options
+```
+
+# Compiler ideas
+
 The functionality of this compiler is dependent on a few basic ideas native to piet:
 
 * Each color block may be exited in exactly 8 ways (North, East, South, and
