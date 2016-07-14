@@ -2,6 +2,7 @@
  * This code is released under the license described in the LICENSE file
  */
 
+#include <fstream>
 #include <iostream>
 #include <iomanip>
 #include <set>
@@ -18,17 +19,29 @@
 #include <args.hxx>
 #include <Magick++.h>
 
+#include <llvm/Transforms/IPO/PassManagerBuilder.h>
 #include <llvm/ADT/APSInt.h>
 #include <llvm/ADT/STLExtras.h>
+#include <llvm/Bitcode/ReaderWriter.h>
+#include <llvm/CodeGen/AsmPrinter.h>
+#include <llvm/ExecutionEngine/GenericValue.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/IRPrintingPasses.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IR/PassManager.h>
+#include <llvm/LinkAllPasses.h>
+#include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Type.h>
 #include <llvm/IR/Verifier.h>
+#include <llvm/InitializePasses.h>
+#include <llvm/Pass.h>
+#include <llvm/Support/raw_ostream.h>
+#include <llvm/Support/raw_os_ostream.h>
 
 #include "color.hxx"
 
@@ -49,6 +62,7 @@ int main(const int argc, const char **argv)
     args::Flag unknownBlack(parser, "unknown-black", "Make unknown colors black", {"unknown-black"});
     args::ValueFlag<size_t> startstacksize(parser, "size", "Specify the starting stack size", {'s', "stack"}, 1);
     args::ValueFlag<std::string> prompt(parser, "prompt", "Prompt for input operations", {'p', "prompt"}, "? ");
+    args::ValueFlag<std::string> output(parser, "output", "Output filename to print", {'o', "output"});
     args::Group required(parser, "", args::Group::Validators::All);
     args::Positional<std::string> input(required, "input", "Input file to use");
 
@@ -871,7 +885,29 @@ int main(const int argc, const char **argv)
                 }
             }
         }
-        module.dump();
+
+        llvm::legacy::PassManager passManager;
+        llvm::legacy::FunctionPassManager fpm(&module);
+        fpm.add(llvm::createVerifierPass());
+        std::unique_ptr<std::ofstream> filestream;
+        std::ostream *raw_ostream = &std::cout;
+        if (output)
+        {
+            filestream = std::unique_ptr<std::ofstream>(new std::ofstream(args::get(output), std::ios::binary));
+            raw_ostream = filestream.get();
+        }
+        llvm::raw_os_ostream ostream{*raw_ostream};
+        llvm::PassManagerBuilder pmb;
+        pmb.OptLevel = 3;
+        pmb.SizeLevel = 0;
+        pmb.Inliner = llvm::createFunctionInliningPass();
+        pmb.DisableUnrollLoops = false;
+        pmb.LoopVectorize = true;
+        pmb.SLPVectorize = true;
+        pmb.populateFunctionPassManager(fpm);
+        pmb.populateModulePassManager(passManager);
+        passManager.add(llvm::createPrintModulePass(ostream));
+        passManager.run(module);
         return 0;
     }
     catch (const Magick::Exception &e)
@@ -941,7 +977,7 @@ Field ImageToField(const std::string filename, size_t codelsize, Color unknown)
         std::adjacent_difference(std::begin(linestops), std::end(linestops), std::begin(diffs));
         diffs.pop_front();
         codelsize = *std::min_element(std::begin(diffs), std::end(diffs));
-        std::cout << "autodetected codel size: " << codelsize << std::endl;
+        std::cerr << "autodetected codel size: " << codelsize << std::endl;
     }
 
     // Each vector member is a row, indexed top down
